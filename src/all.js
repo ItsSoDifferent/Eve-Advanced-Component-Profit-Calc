@@ -1,7 +1,7 @@
 // Experimental tab: profitability of everything manufacturable from a market BPO.
 // Self-contained: reads shared settings through window.evecp and owns its own prices, volumes and filters.
 // To remove: delete this file, src/tabs.js, data/all.json, the #tabs/#allview markup and window.evecp in app.js.
-import { buildMods, evaluate, RIG_SEC_MULT, secClass, windowHours } from "./calc.js";
+import { buildMods, evaluate, jobSeconds, RIG_SEC_MULT, secClass, windowHours } from "./calc.js";
 import { fetchPrices, fetchVolumes } from "./api.js";
 
 const KEY = "evecp.all.v1";
@@ -82,7 +82,7 @@ export async function initAll(root, bridge) {
       const mods = { ...base, rigMat: 1 + (rg.mat / 100) * sm, rigTime: 1 + (rg.time / 100) * sm };
       const ctx = { s: sx, mods, sci, adj: bridge.market.adj, inPrice: (id) => priceOf(s, "in", id), outPrice: (id) => priceOf(s, "out", id) };
       const r = evaluate(it.comp, bp, ctx);
-      r.it = it; r.rigNames = rg.names; r.orders = ordersOf(s, it.id);
+      r.it = it; r.rigNames = rg.names; r.orders = ordersOf(s, it.id); r.ctx = ctx; r.mods = mods; r.bpo = bp;
       r.hasPrices = r.outPrice > 0 && r.lines.every((l) => l.price > 0);
       r.profitWin = r.perHour * windowHours(s);
       const v = volumes[it.id];
@@ -145,6 +145,121 @@ export async function initAll(root, bridge) {
     return list;
   }
 
+
+  // ---------- suggested plan (mirrors the Advanced components tab, but only over products with loaded volumes) ----------
+  let planBuyText = "";
+  const SIZES = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.12, 0.06];
+  const KEYS = ["gross", "mat", "shipIn", "shipOut", "install", "fees", "profit"];
+  const slotTotals = (x, f) => ({
+    gross: x.gross * f, mat: x.matCost * f, shipIn: x.shipIn * f, shipOut: x.shipOut * f,
+    install: x.installCost * f, fees: x.fees * f, profit: x.profit * f,
+  });
+
+  // Lazy mode: one job per slot, offered at several sizes up to one that fills the window.
+  function lazyCandidates(r, s) {
+    const winSec = windowHours(s) * 3600;
+    let fit = Math.floor(winSec / (r.seconds / r.runs));
+    while (fit > 1 && jobSeconds(r.it.comp, r.bpo.te, fit, r.mods) > winSec) fit--;
+    if (fit < 1 || jobSeconds(r.it.comp, r.bpo.te, fit, r.mods) > winSec) return [];
+    const capUnits = r.capUnits;
+    const sizes = new Set(SIZES.map((f) => Math.max(1, Math.floor(fit * f))));
+    const capRuns = Math.floor(capUnits / r.it.perRun);
+    if (capRuns >= 1 && capRuns < fit) sizes.add(capRuns);
+    const out = [];
+    for (const runs of sizes) {
+      if (runs * r.it.perRun > capUnits) continue;
+      const lr = evaluate(r.it.comp, r.bpo, { ...r.ctx, s: { ...r.ctx.s, runs } });
+      if (lr.profit > 0) out.push({ r, lr, per: lr.profit, units: lr.units, capUnits, t: slotTotals(lr, 1) });
+    }
+    return out;
+  }
+
+  function allocate(cands, lazy, capital, slots) {
+    let left = slots;
+    let capLeft = capital;
+    const used = new Map();
+    const alloc = [];
+    for (const c of cands) {
+      if (left <= 0) break;
+      const room = c.capUnits - (used.get(c.r.it.id) || 0);
+      let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
+      if (lazy) n = Math.floor(n + 1e-9);
+      if (!(n > 0)) continue;
+      alloc.push({ ...c, n, profit: n * c.per });
+      used.set(c.r.it.id, (used.get(c.r.it.id) || 0) + n * c.units);
+      left -= n;
+      capLeft -= n * c.up;
+    }
+    return { alloc, total: alloc.reduce((x, y) => x + y.profit, 0), left };
+  }
+
+  function planHtml(list, s) {
+    const lazy = s.lazy;
+    const win = windowHours(s);
+    const capital = s.capital > 0 ? Number(s.capital) : Infinity;
+    const known = list.filter((r) => r.volDay != null && r.hasPrices && r.profit > 0);
+    for (const r of known) r.capUnits = r.volDay * (win / 24) * (s.volumeCap / 100);
+    const cands = (lazy
+      ? known.flatMap((r) => lazyCandidates(r, s))
+      : known.map((r) => {
+        const f = (win * 3600) / r.seconds; // jobs per slot per window
+        return { r, per: r.profitWin, units: r.units * f, capUnits: r.capUnits, t: slotTotals(r, f) };
+      })
+    ).map((c) => ({ ...c, up: c.t.mat + c.t.shipIn + c.t.install }));
+
+    // With limited capital also weigh profit per ISK of capital; try several blends and keep the best.
+    let best = allocate([...cands].sort((x, y) => y.per - x.per), lazy, capital, s.slots);
+    if (capital < Infinity) {
+      for (const w of [0.25, 0.5, 0.75, 1]) {
+        const score = (c) => c.per ** (1 - w) * (c.per / c.up) ** w;
+        const alt = allocate([...cands].sort((x, y) => score(y) - score(x)), lazy, capital, s.slots);
+        if (alt.total > best.total) best = alt;
+      }
+    }
+    const { alloc, total, left } = best;
+    const sum = Object.fromEntries(KEYS.map((k) => [k, alloc.reduce((x, y) => x + y.n * y.t[k], 0)]));
+    const upfront = sum.mat + sum.shipIn + sum.install;
+    const totalCost = upfront + sum.shipOut + sum.fees;
+
+    const buy = new Map();
+    for (const x of alloc) {
+      const jobs = lazy ? x.n : (x.n * x.units) / x.r.units;
+      for (const l of (lazy ? x.lr.lines : x.r.lines)) buy.set(l.name, (buy.get(l.name) || 0) + l.need * jobs);
+    }
+    planBuyText = [...buy].sort((x, y) => x[0].localeCompare(y[0])).map(([n, q]) => `${n}\t${Math.ceil(q)}`).join("\n");
+
+    const winLabel = `${Math.floor(win / 24)}d ${win % 24}h`;
+    const head = lazy
+      ? "<tr><th>Product</th><th>Slots</th><th>Runs / job</th><th>Job length</th><th>Units / slot</th><th>Profit / slot</th><th>Total profit</th></tr>"
+      : "<tr><th>Product</th><th>Slots</th><th>Units</th><th>Profit</th></tr>";
+    const body = alloc.map((x) => lazy
+      ? `<tr><td>${esc(x.r.it.name)}</td><td>${x.n}</td><td>${x.lr.runs}</td><td>${fmtTime(x.lr.seconds)}</td><td>${fmtIsk(x.units)}</td><td>${fmtIsk(x.per)}</td><td class="good">${fmtIsk(x.profit)}</td></tr>`
+      : `<tr><td>${esc(x.r.it.name)}</td><td>${x.n.toFixed(1)}</td><td>${fmtIsk(x.n * x.units)}</td><td class="good">${fmtIsk(x.profit)}</td></tr>`).join("");
+    const row = (l, v, c = "") => `<tr><td>${l}</td><td class="${c}">${v}</td></tr>`;
+    const pct = (x) => (sum.gross ? ` <span class="muted">(${((x / sum.gross) * 100).toFixed(1)}%)</span>` : "");
+    const breakdown = `<table class="summary">
+        ${row("Revenue", fmtIsk(sum.gross))}
+        ${row("Materials", "-" + fmtIsk(sum.mat) + pct(sum.mat))}
+        ${row("Shipping in", "-" + fmtIsk(sum.shipIn) + pct(sum.shipIn))}
+        ${row("Job installation", "-" + fmtIsk(sum.install) + pct(sum.install))}
+        ${row("Sales tax + broker fees", "-" + fmtIsk(sum.fees) + pct(sum.fees))}
+        ${row("Shipping out", "-" + fmtIsk(sum.shipOut) + pct(sum.shipOut))}
+        ${row("<b>Total cost</b>", "<b>-" + fmtIsk(totalCost) + "</b>")}
+        ${row("<b>Profit</b>", "<b>" + fmtIsk(total) + "</b>", total > 0 ? "good" : "")}
+        ${row("Margin (profit / revenue)", sum.gross ? ((total / sum.gross) * 100).toFixed(1) + "%" : "-")}
+        ${row("ROI (profit / total cost)", totalCost ? ((total / totalCost) * 100).toFixed(1) + "%" : "-")}
+        ${row("<b>Capital needed up front</b>", "<b>" + fmtIsk(upfront) + "</b>" + (capital < Infinity ? ` <span class="muted">of ${fmtShort(capital)} available</span>` : ""))}
+      </table>`;
+    const hint = known.length
+      ? `Planning over ${known.length} filtered products with loaded volumes.`
+      : `<span class="warn">No products with loaded volumes yet - use "Load volumes" first. The plan only considers products whose market size is known.</span>`;
+    return `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>
+      <div class="muted">${hint} Slots, window, lazy mode, capital and market-share cap come from the shared settings.</div>
+      ${alloc.length ? `<div><b class="good">${fmtIsk(total)} ISK</b> <span class="muted">expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share or capital limit)` : ""}</span></div>
+      <div class="plancols"><table>${head}${body}</table>${breakdown}</div>
+      <p><button id="a-copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="a-copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
+  }
+
   function render() {
     if (root.hidden) return;
     const keepFocus = document.activeElement?.dataset?.a;
@@ -162,6 +277,7 @@ export async function initAll(root, bridge) {
       <div class="intro"><b>All manufacturing (experimental).</b> Every product with a market BPO (${items.length}), using your shared
         skills, structure, location, fees, shipping and ME/TE defaults. Blueprint ME/TE is assumed researched to the defaults.
         <span class="muted">${prices.ts ? "Prices loaded " + new Date(prices.ts).toLocaleTimeString() : "No prices loaded yet."}</span></div>
+      <div id="a-plan" class="planbox">${planHtml(list, bridge.s)}</div>
       <div class="bar">
         <button id="a-load" class="primary" ${busy ? "disabled" : ""}>Load market data</button>
         <button id="a-vol" ${busy || !prices.ts ? "disabled" : ""}>Load volumes for ${Math.min(list.length, a.volN)} filtered items</button>
@@ -229,6 +345,14 @@ export async function initAll(root, bridge) {
 
   root.addEventListener("click", (e) => {
     if (e.target.id === "a-load") return loadPrices();
+    if (e.target.id === "a-copybuy") {
+      const msg = root.querySelector("#a-copymsg");
+      const ok = () => { msg.textContent = "Copied - paste into the in-game Multibuy window"; };
+      return navigator.clipboard.writeText(planBuyText).then(ok, () => {
+        const ta = Object.assign(document.createElement("textarea"), { value: planBuyText });
+        document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove(); ok();
+      });
+    }
     if (e.target.id === "a-vol") return loadVolumes();
     if (e.target.id === "a-more") { a.limit += 200; save(); return render(); }
     const th = e.target.closest("th[data-sort]");
