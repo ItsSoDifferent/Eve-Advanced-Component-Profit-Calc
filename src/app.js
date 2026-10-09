@@ -219,7 +219,7 @@ const COLS = [
   ["share", "Mkt share / slot", (r) => (r.share == null ? "?" : (r.share * 100).toFixed(1) + "%")],
 ];
 
-// Read-only window onto shared state for the experimental "All manufacturing" tab (src/all.js).
+// Read-only window onto shared state for the "All manufacturing" tab (src/all.js).
 window.evecp = {
   get s() { return s; },
   get market() { return market; },

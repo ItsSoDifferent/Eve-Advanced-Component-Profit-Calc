@@ -1,4 +1,4 @@
-// Experimental tab: profitability of everything manufacturable from a market BPO.
+// All manufacturing tab: profitability of everything manufacturable from a market BPO.
 // Self-contained: reads shared settings through window.evecp and owns its own prices, volumes and filters.
 // To remove: delete this file, src/tabs.js, data/all.json, the #tabs/#allview markup and window.evecp in app.js.
 import { buildMods, evaluate, inputMap, inputRoom, jobSeconds, RIG_SEC_MULT, secClass, tightestInputs, windowHours } from "./calc.js";
@@ -290,7 +290,7 @@ export async function initAll(root, bridge) {
     }).join("");
     const opt = (list, cur) => list.map((x) => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("");
     root.innerHTML = `
-      <div class="intro"><b>All manufacturing (experimental).</b> Every product with a market BPO (${items.length}), using your shared
+      <div class="intro"><b>All manufacturing.</b> Every product with a market BPO (${items.length}), using your shared
         skills, structure, location, fees, shipping and ME/TE defaults. Blueprint ME/TE is assumed researched to the defaults.
         <span class="muted">${prices.ts ? "Prices loaded " + new Date(prices.ts).toLocaleTimeString() : "No prices loaded yet."}</span></div>
       <div id="a-plan" class="planbox">${planHtml(list, bridge.s)}</div>

@@ -1,4 +1,4 @@
-"""Build data/all.json: every product that can be manufactured from a BPO sold on the market (experimental tab).
+"""Build data/all.json: every product that can be manufactured from a BPO sold on the market.
 
 Usage: python -I scripts/build_all_data.py <dir with extracted reference-data> [out_dir]
 """
