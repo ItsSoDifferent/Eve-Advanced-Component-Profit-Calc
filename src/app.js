@@ -24,6 +24,7 @@ const DEFAULTS = {
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
 let data, rigs, systems, s;
 let lastCtx;
+let planBuyText = "";
 let market = { adj: {}, indices: {}, prices: {}, volumes: {}, ts: 0 };
 
 // ---------- state helpers ----------
@@ -301,6 +302,15 @@ function renderPlan(rows) {
     alloc.push({ ...c, n, profit: n * c.per });
     left -= n; total += n * c.per;
   }
+  // Aggregate inputs for the whole plan, in the "Item name<TAB>quantity" form the in-game multibuy accepts.
+  const buy = new Map();
+  for (const a of alloc) {
+    const jobs = lazy ? a.n : (a.n * a.units) / a.r.units; // non-lazy: jobs of s.runs runs, fractional total
+    const lines = lazy ? a.lr.lines : a.r.lines;
+    for (const l of lines) buy.set(l.name, (buy.get(l.name) || 0) + l.need * jobs);
+  }
+  planBuyText = [...buy].sort((x, y) => x[0].localeCompare(y[0]))
+    .map(([name, q]) => `${name}\t${Math.ceil(q)}`).join("\n");
   const missing = rows.filter((r) => !r.hasPrices).length;
   const pending = !market.ts ? "<p class='warn'>No market data yet - press Refresh.</p>" : "";
   const winLabel = `${Math.floor(win / 24)}d ${win % 24}h`;
@@ -313,7 +323,7 @@ function renderPlan(rows) {
   $("#plan").innerHTML = `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}</h3>${pending}
     <div><b class="${total > 0 ? "good" : ""}">${fmtIsk(total)} ISK</b>
     <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots idle (nothing profitable within the market-share cap)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
-    ${alloc.length ? `<table>${head}${body}</table>` : ""}`;
+    ${alloc.length ? `<table>${head}${body}</table><p><button id="copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
 }
 
 // ---------- market refresh ----------
@@ -400,6 +410,18 @@ function init() {
       const id = Number(tr.dataset.id);
       view.open.has(id) ? view.open.delete(id) : view.open.add(id);
       renderResults();
+    }
+  });
+  $("#plan").addEventListener("click", async (e) => {
+    if (e.target.id !== "copybuy") return;
+    const msg = $("#copymsg");
+    try {
+      await navigator.clipboard.writeText(planBuyText);
+      msg.textContent = "Copied - paste into the in-game Multibuy window";
+    } catch {
+      const ta = Object.assign(document.createElement("textarea"), { value: planBuyText });
+      document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+      msg.textContent = "Copied - paste into the in-game Multibuy window";
     }
   });
   $("#refresh").addEventListener("click", refresh);
