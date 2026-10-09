@@ -218,7 +218,17 @@ const COLS = [
   ["share", "Mkt share / slot", (r) => (r.share == null ? "?" : (r.share * 100).toFixed(1) + "%")],
 ];
 
+// Read-only window onto shared state for the experimental "All manufacturing" tab (src/all.js).
+window.evecp = {
+  get s() { return s; },
+  get market() { return market; },
+  get fmt() { return { fmtIsk, fmtShort, fmtTime }; },
+  system: () => { const sys = currentSystem(); return { sec: sys ? sys[2] : 1, sci: sciFor(sys) }; },
+  refreshShared: async () => { if (!market.ts) await refresh(); },
+};
+
 function renderResults() {
+  document.dispatchEvent(new Event("evecp:change"));
   const rows = computeRows();
   renderPlan(rows);
   const q = view.search.toLowerCase();

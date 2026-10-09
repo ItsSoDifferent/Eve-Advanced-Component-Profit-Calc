@@ -55,3 +55,12 @@ td input.price { width: 92px; }
 .plancols { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
 #plan table.summary td:last-child { text-align: right; }
 #plan table.summary td:first-child { text-align: left; }
+
+#tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); background: var(--bg); }
+#tabs button { border-radius: 4px 4px 0 0; border-bottom: none; }
+#tabs button.active { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+[hidden] { display: none !important; }
+#allview .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px; }
+#allview .bar select, #allview .bar input[type=search], #allview .bar input[type=number] { width: auto; }
+#allview .bar input[type=number] { width: 70px; }
+#allview .intro { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }

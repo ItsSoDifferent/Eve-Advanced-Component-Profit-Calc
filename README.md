@@ -29,3 +29,9 @@ No build step. Serve the folder (ES modules need http) and open it:
 
 Triglavian components have no manufacturing blueprint in the SDE, so they are not listed.
 Structure/rig numbers come from the dump; sales tax base (7.5%) and SCC surcharge (4%) are editable settings.
+
+## Experimental: All manufacturing tab
+
+Lives on its own tab and loads lazily. Covers every T1/structure product with a market BPO (`data/all.json`, built by
+`scripts/build_all_data.py`). To remove it: delete `src/all.js`, `src/tabs.js`, `data/all.json`, `scripts/build_all_data.py`,
+the `#tabs`/`#allview` markup in `index.html`, and the `window.evecp` bridge in `src/app.js`.

@@ -15,8 +15,13 @@
   <button id="reset">Reset settings</button>
 </header>
 
+<nav id="tabs">
+  <button data-tab="results" class="active">Advanced components</button>
+  <button data-tab="allview">All manufacturing <span class="muted">(experimental)</span></button>
+</nav>
 <main>
   <aside id="settings"></aside>
+  <section id="allview" hidden></section>
   <section id="results">
     <div id="plan"></div>
     <div id="toolbar">
@@ -34,5 +39,6 @@
   </section>
 </main>
 <script type="module" src="src/app.js"></script>
+<script type="module" src="src/tabs.js"></script>
 </body>
 </html>
