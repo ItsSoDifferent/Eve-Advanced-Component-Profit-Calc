@@ -49,3 +49,12 @@ Reaction settings live in the sidebar: the Reactions skill (-4% time per level) 
 location a separate reaction system, cost index, structure (Athanor, no bonus; Tatara, -25% time), three reactor rigs
 (M-set rigs fit an Athanor, L-set a Tatara, each only helps its own reaction type) and facility tax. Reactor rig bonuses
 are x1.0 in low-sec and wormholes and x1.1 in null-sec; reactions cannot run in high-sec. Formulas have no ME/TE.
+
+## Reaction chain tab
+
+Builds advanced components from inputs you either buy or react yourself (`src/chain.js`). Each input costs the cheaper of
+its market price and its reaction cost, expanded recursively through nested reactions down to the raw moon goo, gas and fuel
+blocks you would buy; a mode selector can force "always react" or "never react". The table compares chained and buy-all costs
+per component. The suggested plan respects both slot pools (manufacturing slots and reaction slots), capital, market share and
+raw-input supply, lists the reaction jobs to run, and copies a multibuy for the raw inputs. Component jobs follow lazy mode;
+reactor jobs are sized to the need, so reactor slots are fractional.

@@ -8,8 +8,9 @@ tabs.forEach((b) => b.addEventListener("click", async () => {
   const kind = b.dataset.kind;
   if (kind && !loaded.has(kind)) {
     loaded.add(kind);
-    const m = await import("./all.js");
-    m.initAll(document.getElementById(b.dataset.tab), window.evecp, kind);
+    const root = document.getElementById(b.dataset.tab);
+    if (kind === "chain") (await import("./chain.js")).initChain(root, window.evecp);
+    else (await import("./all.js")).initAll(root, window.evecp, kind);
   }
   document.dispatchEvent(new Event("evecp:change"));
 }));
