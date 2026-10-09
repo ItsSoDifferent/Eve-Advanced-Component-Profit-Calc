@@ -27,6 +27,7 @@ const RIG_SIZE = { raitaru: "M-Set", azbel: "L-Set", sotiyo: "XL-Set" };
 export async function initAll(root, bridge, kind = "manufacturing") {
   const cfg = CONFIGS[kind];
   const REACT = kind === "reaction";
+  const slotsOf = (s) => (REACT ? s.reactSlots : s.slots); // reactions have their own job slots (Mass Reactions skills)
   const { fmtIsk, fmtShort, fmtTime } = bridge.fmt;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   let a = { ...DEFAULTS, runs: cfg.runs };
@@ -121,7 +122,7 @@ export async function initAll(root, bridge, kind = "manufacturing") {
       const slotUnits = (r.units / r.seconds) * 3600 * windowHours(s);
       const marketUnits = v == null ? null : v * (windowHours(s) / 24) * (s.volumeCap / 100);
       r.share = v ? slotUnits / (v * (windowHours(s) / 24)) : null;
-      r.maxProfit = marketUnits == null ? null : (r.profit / r.units) * Math.min(marketUnits, slotUnits * s.slots);
+      r.maxProfit = marketUnits == null ? null : (r.profit / r.units) * Math.min(marketUnits, slotUnits * slotsOf(s));
       r.satSlots = marketUnits == null ? null : marketUnits / slotUnits;
       return r;
     });
@@ -248,11 +249,11 @@ export async function initAll(root, bridge, kind = "manufacturing") {
     }));
 
     // With limited capital also weigh profit per ISK of capital; try several blends and keep the best.
-    let best = allocate([...cands].sort((x, y) => y.per - x.per), lazy, capital, s.slots);
+    let best = allocate([...cands].sort((x, y) => y.per - x.per), lazy, capital, slotsOf(s));
     if (capital < Infinity) {
       for (const w of [0.25, 0.5, 0.75, 1]) {
         const score = (c) => c.per ** (1 - w) * (c.per / c.up) ** w;
-        const alt = allocate([...cands].sort((x, y) => score(y) - score(x)), lazy, capital, s.slots);
+        const alt = allocate([...cands].sort((x, y) => score(y) - score(x)), lazy, capital, slotsOf(s));
         if (alt.total > best.total) best = alt;
       }
     }
@@ -294,7 +295,7 @@ export async function initAll(root, bridge, kind = "manufacturing") {
     const hint = known.length
       ? `Planning over ${known.length} filtered products with loaded volumes.`
       : `<span class="warn">No products with loaded volumes yet - use "Load volumes" first. The plan only considers products whose market size is known.</span>`;
-    return `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>
+    return `<h3>Suggested plan - ${slotsOf(s)} ${REACT ? "reaction " : ""}slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>
       <div class="muted">${hint} Slots, window, lazy mode, capital and market-share cap come from the shared settings.</div>
       ${alloc.length ? `<div><b class="good">${fmtIsk(total)} ISK</b> <span class="muted">expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share, input-supply or capital limit)` : ""}</span></div>
       ${tight.length ? `<div class="muted">Tightest inputs (share of the allowed supply on the market): ${tight.map((x) => `${esc(x.name)} ${Number.isFinite(x.pct) ? (x.pct * 100).toFixed(0) + "%" : "no supply"}`).join(", ")}</div>` : ""}
