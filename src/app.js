@@ -14,7 +14,7 @@ const DEFAULTS = {
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
   system: "Jita", sciOverride: "",
   structure: "raitaru", rigs: ["", "", ""], facilityTax: 1, sccSurcharge: 4,
-  runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, defaultME: 10, defaultTE: 20, volumeCap: 10,
+  runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, capital: "", defaultME: 10, defaultTE: 20, volumeCap: 10,
   inHub: "s:60003760", outHub: "s:60003760",
   inputMethod: "instant", outputMethod: "order", priceStat: "percentile",
   shipIn: { perM3: 0, collateral: 0 }, shipOut: { perM3: 0, collateral: 0 },
@@ -80,6 +80,7 @@ function sections() {
       num("windowDays", "Plan window: days", "Use less than 7d/0h so jobs finish before you can restart them", 'min="0" max="7"'),
       num("windowHours", "Plan window: extra hours", "", 'min="0" max="23"'),
       { path: "lazy", label: "Lazy mode", type: "checkbox", hint: "Whole slots only; each slot runs one job sized to fill the window, so you set it and forget it" },
+      num("capital", "Starting capital (ISK)", "Blank = unlimited. Caps materials + inbound shipping + job fees paid up front", 'min="0" step="any" placeholder="unlimited"'),
       num("volumeCap", "Max share of weekly market volume (%)", "Caps units the plan will sell per product", 'min="0" step="1"'),
     ] },
     { title: "Market", open: true, fields: [
@@ -283,25 +284,58 @@ function lazyCandidate(r) {
   const lr = evaluate(r.comp, r.bp, { ...lastCtx, s: { ...s, runs } });
   if (!(lr.profit > 0) || !r.hasPrices) return null;
   const cap = r.weeklyVol == null ? Infinity : Math.floor((r.weeklyVol * (s.volumeCap / 100)) / lr.units);
-  return { r, lr, per: lr.profit, maxSlots: cap, units: lr.units };
+  return { r, lr, per: lr.profit, maxSlots: cap, units: lr.units, t: slotTotals(lr, 1) };
+}
+
+const SUM_KEYS = ["gross", "mat", "shipIn", "shipOut", "install", "fees", "profit"];
+
+// Per-slot totals for one window, so allocation and the breakdown can just multiply by slot count.
+function slotTotals(src, f) {
+  return {
+    gross: src.gross * f, mat: src.matCost * f, shipIn: src.shipIn * f, shipOut: src.shipOut * f,
+    install: src.installCost * f, fees: src.fees * f, profit: src.profit * f,
+  };
+}
+
+function allocate(cands, lazy, capital) {
+  let left = s.slots, capLeft = capital;
+  const alloc = [];
+  for (const c of cands) {
+    if (left <= 0) break;
+    let n = Math.min(left, c.maxSlots, c.up > 0 ? capLeft / c.up : Infinity);
+    if (lazy) n = Math.floor(n);
+    if (!(n > 0)) continue;
+    alloc.push({ ...c, n, profit: n * c.per });
+    left -= n; capLeft -= n * c.up;
+  }
+  const total = alloc.reduce((a, x) => a + x.profit, 0);
+  return { alloc, total, left };
 }
 
 function renderPlan(rows) {
   const lazy = s.lazy;
   const win = windowHours(s);
+  const capital = s.capital > 0 ? Number(s.capital) : Infinity;
   const cands = (lazy
     ? rows.map(lazyCandidate).filter(Boolean)
-    : rows.filter((r) => r.profit > 0 && r.hasPrices).map((r) => ({ r, per: r.weeklyPerSlot, maxSlots: r.maxSlots, units: r.unitsPerWeekPerSlot }))
-  ).sort((a, b) => b.per - a.per);
-  let left = s.slots, total = 0;
-  const alloc = [];
-  for (const c of cands) {
-    if (left <= 0) break;
-    const n = Math.min(left, lazy ? Math.floor(c.maxSlots) : c.maxSlots);
-    if (!(n > 0)) continue;
-    alloc.push({ ...c, n, profit: n * c.per });
-    left -= n; total += n * c.per;
+    : rows.filter((r) => r.profit > 0 && r.hasPrices).map((r) => {
+      const f = r.unitsPerWeekPerSlot / r.units; // jobs per slot per window
+      return { r, per: r.weeklyPerSlot, maxSlots: r.maxSlots, units: r.unitsPerWeekPerSlot, t: slotTotals(r, f) };
+    })
+  ).map((c) => ({ ...c, up: c.t.mat + c.t.shipIn + c.t.install }));
+
+  // With limited capital, ranking by profit per slot is no longer necessarily best; try both and keep the better.
+  let best = allocate([...cands].sort((a, b) => b.per - a.per), lazy, capital);
+  if (capital < Infinity) {
+    const alt = allocate([...cands].sort((a, b) => b.per / b.up - a.per / a.up), lazy, capital);
+    if (alt.total > best.total) best = alt;
   }
+  const { alloc, total, left } = best;
+
+  const sum = Object.fromEntries(SUM_KEYS.map((k) => [k, alloc.reduce((a, x) => a + x.n * x.t[k], 0)]));
+  const upfront = sum.mat + sum.shipIn + sum.install;
+  const totalCost = upfront + sum.shipOut + sum.fees;
+
   // Aggregate inputs for the whole plan, in the "Item name<TAB>quantity" form the in-game multibuy accepts.
   const buy = new Map();
   for (const a of alloc) {
@@ -311,6 +345,7 @@ function renderPlan(rows) {
   }
   planBuyText = [...buy].sort((x, y) => x[0].localeCompare(y[0]))
     .map(([name, q]) => `${name}\t${Math.ceil(q)}`).join("\n");
+
   const missing = rows.filter((r) => !r.hasPrices).length;
   const pending = !market.ts ? "<p class='warn'>No market data yet - press Refresh.</p>" : "";
   const winLabel = `${Math.floor(win / 24)}d ${win % 24}h`;
@@ -320,10 +355,25 @@ function renderPlan(rows) {
   const body = alloc.map((a) => lazy
     ? `<tr><td>${esc(a.r.comp.name)}</td><td>${a.n}</td><td>${a.lr.runs}</td><td>${fmtTime(a.lr.seconds)}</td><td>${fmtIsk(a.units)}</td><td>${fmtIsk(a.per)}</td><td class="good">${fmtIsk(a.profit)}</td></tr>`
     : `<tr><td>${esc(a.r.comp.name)}</td><td>${a.n.toFixed(1)}</td><td>${fmtIsk(a.n * a.units)}</td><td class="good">${fmtIsk(a.profit)}</td></tr>`).join("");
-  $("#plan").innerHTML = `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}</h3>${pending}
+  const row = (l, v, cls = "") => `<tr><td>${l}</td><td class="${cls}">${v}</td></tr>`;
+  const pct = (x) => (totalCost ? ` <span class="muted">(${((x / sum.gross) * 100).toFixed(1)}%)</span>` : "");
+  const breakdown = `<table class="summary">
+      ${row("Revenue", fmtIsk(sum.gross))}
+      ${row("Materials", "-" + fmtIsk(sum.mat) + pct(sum.mat))}
+      ${row("Shipping in", "-" + fmtIsk(sum.shipIn) + pct(sum.shipIn))}
+      ${row("Job installation (system, facility, SCC)", "-" + fmtIsk(sum.install) + pct(sum.install))}
+      ${row("Sales tax + broker fees", "-" + fmtIsk(sum.fees) + pct(sum.fees))}
+      ${row("Shipping out", "-" + fmtIsk(sum.shipOut) + pct(sum.shipOut))}
+      ${row("<b>Total cost</b>", "<b>-" + fmtIsk(totalCost) + "</b>")}
+      ${row("<b>Profit</b>", "<b>" + fmtIsk(total) + "</b>", total > 0 ? "good" : "")}
+      ${row("Margin (profit / revenue)", sum.gross ? ((total / sum.gross) * 100).toFixed(1) + "%" : "-")}
+      ${row("ROI (profit / total cost)", totalCost ? ((total / totalCost) * 100).toFixed(1) + "%" : "-")}
+      ${row("<b>Capital needed up front</b>", "<b>" + fmtIsk(upfront) + "</b>" + (capital < Infinity ? ` <span class="muted">of ${fmtShort(capital)} available</span>` : ""))}
+    </table>`;
+  $("#plan").innerHTML = `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>${pending}
     <div><b class="${total > 0 ? "good" : ""}">${fmtIsk(total)} ISK</b>
-    <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots idle (nothing profitable within the market-share cap)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
-    ${alloc.length ? `<table>${head}${body}</table><p><button id="copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
+    <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share or capital limit)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
+    ${alloc.length ? `<div class="plancols"><table>${head}${body}</table>${breakdown}</div><p><button id="copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
 }
 
 // ---------- market refresh ----------

@@ -51,3 +51,7 @@ td input.price { width: 92px; }
 .mats table { width: 100%; }
 .mats td:first-child { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .mats td input { width: 84px; }
+
+.plancols { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+#plan table.summary td:last-child { text-align: right; }
+#plan table.summary td:first-child { text-align: left; }
