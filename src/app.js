@@ -1,5 +1,5 @@
 import {
-  STRUCTURES, buildMods, evaluate, salesTax, brokerFee, secClass,
+  STRUCTURES, buildMods, evaluate, jobSeconds, windowHours, salesTax, brokerFee, secClass,
   fmtIsk, fmtShort, fmtTime,
 } from "./calc.js";
 import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from "./api.js";
@@ -14,7 +14,7 @@ const DEFAULTS = {
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
   system: "Jita", sciOverride: "",
   structure: "raitaru", rigs: ["", "", ""], facilityTax: 1, sccSurcharge: 4,
-  runs: 100, slots: 10, defaultME: 10, defaultTE: 20, volumeCap: 10,
+  runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, defaultME: 10, defaultTE: 20, volumeCap: 10,
   inHub: "s:60003760", outHub: "s:60003760",
   inputMethod: "instant", outputMethod: "order", priceStat: "percentile",
   shipIn: { perM3: 0, collateral: 0 }, shipOut: { perM3: 0, collateral: 0 },
@@ -23,6 +23,7 @@ const DEFAULTS = {
 
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
 let data, rigs, systems, s;
+let lastCtx;
 let market = { adj: {}, indices: {}, prices: {}, volumes: {}, ts: 0 };
 
 // ---------- state helpers ----------
@@ -75,6 +76,9 @@ function sections() {
       num("defaultTE", "Default blueprint TE", "Even values 0-20", 'min="0" max="20" step="2"'),
       num("runs", "Runs per job", "Affects rounding of material quantities", 'min="1"'),
       num("slots", "Manufacturing slots", "Used for the weekly plan", 'min="1"'),
+      num("windowDays", "Plan window: days", "Use less than 7d/0h so jobs finish before you can restart them", 'min="0" max="7"'),
+      num("windowHours", "Plan window: extra hours", "", 'min="0" max="23"'),
+      { path: "lazy", label: "Lazy mode", type: "checkbox", hint: "Whole slots only; each slot runs one job sized to fill the window, so you set it and forget it" },
       num("volumeCap", "Max share of weekly market volume (%)", "Caps units the plan will sell per product", 'min="0" step="1"'),
     ] },
     { title: "Market", open: true, fields: [
@@ -113,6 +117,9 @@ function fieldHtml(f) {
   if (f.type === "feeinfo") return `<div class="full hint" id="feeinfo"></div>`;
   if (f.type === "materials") return `<div class="mats" id="mats"></div>`;
   const v = getPath(s, f.path);
+  if (f.type === "checkbox") {
+    return `<label>${esc(f.label)}</label><input type="checkbox" data-path="${f.path}" ${v ? "checked" : ""}>${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}`;
+  }
   const input = f.type === "select"
     ? `<select data-path="${f.path}">${f.opts.map(([o, l]) => `<option value="${o}" ${o === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`
     : `<input type="number" data-path="${f.path}" value="${v}" ${f.attrs || ""}>`;
@@ -180,13 +187,13 @@ const outPrice = (id) => (s.overrides.out[id] > 0 ? Number(s.overrides.out[id]) 
 function computeRows() {
   const sys = currentSystem();
   const mods = buildMods(s, rigs, sys ? sys[2] : 1);
-  const ctx = { s, mods, sci: sciFor(sys), adj: market.adj, inPrice, outPrice };
+  const ctx = lastCtx = { s, mods, sci: sciFor(sys), adj: market.adj, inPrice, outPrice };
   return data.components.map((c) => {
     const o = s.bp[c.blueprint] || {};
     const bp = { me: o.me ?? s.defaultME, te: o.te ?? s.defaultTE, custom: !!(o.me != null || o.te != null) };
     const r = evaluate(c, bp, ctx);
     const vol = market.volumes[c.id];
-    r.weeklyVol = vol == null ? null : vol * 7;
+    r.weeklyVol = vol == null ? null : (vol * windowHours(s)) / 24;
     r.maxSlots = r.weeklyVol == null ? Infinity : (r.weeklyVol * (s.volumeCap / 100)) / r.unitsPerWeekPerSlot;
     r.share = r.weeklyVol ? r.unitsPerWeekPerSlot / r.weeklyVol : null;
     r.hasPrices = r.outPrice > 0 && r.lines.every((l) => l.price > 0);
@@ -205,7 +212,7 @@ const COLS = [
   ["roi", "ROI", (r) => (r.roi * 100).toFixed(1) + "%"],
   ["seconds", "Job time", (r) => fmtTime(r.seconds)],
   ["perHour", "ISK / hour / slot", (r) => fmtShort(r.perHour)],
-  ["weeklyPerSlot", "Weekly / slot", (r) => fmtShort(r.weeklyPerSlot)],
+  ["weeklyPerSlot", "Profit / window / slot", (r) => fmtShort(r.weeklyPerSlot)],
   ["share", "Mkt share / slot", (r) => (r.share == null ? "?" : (r.share * 100).toFixed(1) + "%")],
 ];
 
@@ -259,30 +266,54 @@ function detailHtml(r) {
       ${row("Facility tax", "-" + fmtIsk(r.facility))}
       ${row("SCC surcharge", "-" + fmtIsk(r.scc))}
       ${row("<b>Profit per job</b>", "<b>" + fmtIsk(r.profit) + "</b>", r.profit > 0 ? "good" : "bad")}
-      ${row("Weekly, all slots on this", fmtIsk(r.weeklyTotal))}
-      ${row("Units / week / slot", fmtIsk(r.unitsPerWeekPerSlot))}
-      ${row("Market volume / week", r.weeklyVol == null ? "unknown" : fmtIsk(r.weeklyVol))}
+      ${row("Per window, all slots on this", fmtIsk(r.weeklyTotal))}
+      ${row("Units / window / slot", fmtIsk(r.unitsPerWeekPerSlot))}
+      ${row("Market volume / window", r.weeklyVol == null ? "unknown" : fmtIsk(r.weeklyVol))}
     </table></div></div>`;
 }
 
+// Lazy mode: one job per slot, with the run count chosen so it just fits inside the window.
+function lazyCandidate(r) {
+  const winSec = windowHours(s) * 3600;
+  const { mods } = lastCtx;
+  let runs = Math.floor(winSec / (r.seconds / r.runs));
+  while (runs > 1 && jobSeconds(r.comp, r.bp.te, runs, mods) > winSec) runs--;
+  if (runs < 1 || jobSeconds(r.comp, r.bp.te, runs, mods) > winSec) return null;
+  const lr = evaluate(r.comp, r.bp, { ...lastCtx, s: { ...s, runs } });
+  if (!(lr.profit > 0) || !r.hasPrices) return null;
+  const cap = r.weeklyVol == null ? Infinity : Math.floor((r.weeklyVol * (s.volumeCap / 100)) / lr.units);
+  return { r, lr, per: lr.profit, maxSlots: cap, units: lr.units };
+}
+
 function renderPlan(rows) {
-  const cands = rows.filter((r) => r.profit > 0 && r.hasPrices).sort((a, b) => b.weeklyPerSlot - a.weeklyPerSlot);
+  const lazy = s.lazy;
+  const win = windowHours(s);
+  const cands = (lazy
+    ? rows.map(lazyCandidate).filter(Boolean)
+    : rows.filter((r) => r.profit > 0 && r.hasPrices).map((r) => ({ r, per: r.weeklyPerSlot, maxSlots: r.maxSlots, units: r.unitsPerWeekPerSlot }))
+  ).sort((a, b) => b.per - a.per);
   let left = s.slots, total = 0;
   const alloc = [];
-  for (const r of cands) {
+  for (const c of cands) {
     if (left <= 0) break;
-    const n = Math.min(left, r.maxSlots);
-    if (n <= 0) continue;
-    alloc.push({ r, n, profit: n * r.weeklyPerSlot });
-    left -= n; total += n * r.weeklyPerSlot;
+    const n = Math.min(left, lazy ? Math.floor(c.maxSlots) : c.maxSlots);
+    if (!(n > 0)) continue;
+    alloc.push({ ...c, n, profit: n * c.per });
+    left -= n; total += n * c.per;
   }
   const missing = rows.filter((r) => !r.hasPrices).length;
   const pending = !market.ts ? "<p class='warn'>No market data yet - press Refresh.</p>" : "";
-  $("#plan").innerHTML = `<h3>Suggested weekly plan - ${s.slots} slots</h3>${pending}
-    <div><b class="${total > 0 ? "good" : ""}">${fmtIsk(total)} ISK / week</b>
-    <span class="muted"> expected profit${left > 0.01 ? `; ${left.toFixed(1)} slots idle (no profitable product within the market-share cap)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
-    ${alloc.length ? `<table><tr><th>Product</th><th>Slots</th><th>Units / week</th><th>Weekly profit</th></tr>${alloc.map((a) =>
-      `<tr><td>${esc(a.r.comp.name)}</td><td>${a.n.toFixed(1)}</td><td>${fmtIsk(a.n * a.r.unitsPerWeekPerSlot)}</td><td class="good">${fmtIsk(a.profit)}</td></tr>`).join("")}</table>` : ""}`;
+  const winLabel = `${Math.floor(win / 24)}d ${win % 24}h`;
+  const head = lazy
+    ? "<tr><th>Product</th><th>Slots</th><th>Runs / job</th><th>Job length</th><th>Units / slot</th><th>Profit / slot</th><th>Total profit</th></tr>"
+    : "<tr><th>Product</th><th>Slots</th><th>Units</th><th>Profit</th></tr>";
+  const body = alloc.map((a) => lazy
+    ? `<tr><td>${esc(a.r.comp.name)}</td><td>${a.n}</td><td>${a.lr.runs}</td><td>${fmtTime(a.lr.seconds)}</td><td>${fmtIsk(a.units)}</td><td>${fmtIsk(a.per)}</td><td class="good">${fmtIsk(a.profit)}</td></tr>`
+    : `<tr><td>${esc(a.r.comp.name)}</td><td>${a.n.toFixed(1)}</td><td>${fmtIsk(a.n * a.units)}</td><td class="good">${fmtIsk(a.profit)}</td></tr>`).join("");
+  $("#plan").innerHTML = `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}</h3>${pending}
+    <div><b class="${total > 0 ? "good" : ""}">${fmtIsk(total)} ISK</b>
+    <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots idle (nothing profitable within the market-share cap)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
+    ${alloc.length ? `<table>${head}${body}</table>` : ""}`;
 }
 
 // ---------- market refresh ----------
@@ -323,7 +354,8 @@ function onSettingChange(e) {
   const t = e.target;
   if (t.dataset.path) {
     let v = t.value;
-    if (t.type === "number") v = v === "" ? "" : Number(v);
+    if (t.type === "checkbox") v = t.checked;
+    else if (t.type === "number") v = v === "" ? "" : Number(v);
     else if (t.hasAttribute("data-int")) v = v === "" ? "" : Number(v);
     setPath(s, t.dataset.path, v);
     save(SETTINGS_KEY, s);

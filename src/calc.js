@@ -10,6 +10,9 @@ export const STRUCTURES = {
 export const secClass = (sec) => (sec >= 0.45 ? "high" : sec > 0 ? "low" : "null");
 export const RIG_SEC_MULT = { high: 1.0, low: 1.9, null: 2.1 };
 
+/** Length of the planning window in hours (normally 168, but can be shortened to avoid schedule drift). */
+export const windowHours = (s) => Math.max(1, s.windowDays * 24 + s.windowHours);
+
 const blank = (v) => v === "" || v == null;
 
 export function salesTax(s) {
@@ -96,14 +99,15 @@ export function evaluate(comp, bp, ctx) {
   const seconds = jobSeconds(comp, bp.te, runs, mods);
   const hours = seconds / 3600;
   const perHour = profit / hours;
-  const weeklyPerSlot = perHour * 24 * 7;
+  const win = windowHours(s);
+  const weeklyPerSlot = perHour * win;
   return {
     comp, bp, runs, units, lines, eiv, sci: ctx.sci, sysCost, facility, scc, installCost,
     matCost, shipIn, shipOut, gross, fees, outPrice, totalCost, profit,
     margin: gross ? profit / gross : 0,
     roi: totalCost ? profit / totalCost : 0,
     seconds, perHour, weeklyPerSlot,
-    unitsPerWeekPerSlot: (units / hours) * 24 * 7,
+    unitsPerWeekPerSlot: (units / hours) * win,
     weeklyTotal: weeklyPerSlot * s.slots,
     costPerUnit: totalCost / units,
   };
