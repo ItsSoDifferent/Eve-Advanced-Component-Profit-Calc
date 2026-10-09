@@ -1,7 +1,7 @@
 // Experimental tab: profitability of everything manufacturable from a market BPO.
 // Self-contained: reads shared settings through window.evecp and owns its own prices, volumes and filters.
 // To remove: delete this file, src/tabs.js, data/all.json, the #tabs/#allview markup and window.evecp in app.js.
-import { buildMods, evaluate, jobSeconds, RIG_SEC_MULT, secClass, windowHours } from "./calc.js";
+import { buildMods, evaluate, inputMap, inputRoom, jobSeconds, RIG_SEC_MULT, secClass, tightestInputs, windowHours } from "./calc.js";
 import { fetchPrices, fetchVolumes } from "./api.js";
 
 const KEY = "evecp.all.v1";
@@ -180,23 +180,28 @@ export async function initAll(root, bridge) {
     return out;
   }
 
+  // Units of an input the plan may buy: a share of what is listed on sell orders at the buy hub.
+  const inputSupply = (id) => (prices.in[id]?.sell?.volume || 0) * (bridge.s.inputCap / 100);
+
   function allocate(cands, lazy, capital, slots) {
     let left = slots;
     let capLeft = capital;
     const used = new Map();
+    const usedIn = new Map();
     const alloc = [];
     for (const c of cands) {
       if (left <= 0) break;
       const room = c.capUnits - (used.get(c.r.it.id) || 0);
-      let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
+      let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity, inputRoom(c, usedIn, inputSupply));
       if (lazy) n = Math.floor(n + 1e-9);
       if (!(n > 0) || n * c.units < c.r.it.perRun) continue; // less than one run of output: nothing to sell
       alloc.push({ ...c, n, profit: n * c.per });
       used.set(c.r.it.id, (used.get(c.r.it.id) || 0) + n * c.units);
+      for (const [id, q] of c.inputs) usedIn.set(id, (usedIn.get(id) || 0) + n * q);
       left -= n;
       capLeft -= n * c.up;
     }
-    return { alloc, total: alloc.reduce((x, y) => x + y.profit, 0), left };
+    return { alloc, total: alloc.reduce((x, y) => x + y.profit, 0), left, usedIn };
   }
 
   function planHtml(list, s) {
@@ -211,7 +216,10 @@ export async function initAll(root, bridge) {
         const f = (win * 3600) / r.seconds; // jobs per slot per window
         return { r, per: r.profitWin, units: r.units * f, capUnits: r.capUnits, t: slotTotals(r, f) };
       })
-    ).map((c) => ({ ...c, up: c.t.mat + c.t.shipIn + c.t.install }));
+    ).map((c) => ({
+      ...c, up: c.t.mat + c.t.shipIn + c.t.install,
+      inputs: inputMap(c.lr ? c.lr.lines : c.r.lines, c.lr ? 1 : c.units / c.r.units), // per slot, per window
+    }));
 
     // With limited capital also weigh profit per ISK of capital; try several blends and keep the best.
     let best = allocate([...cands].sort((x, y) => y.per - x.per), lazy, capital, s.slots);
@@ -222,7 +230,8 @@ export async function initAll(root, bridge) {
         if (alt.total > best.total) best = alt;
       }
     }
-    const { alloc, total, left } = best;
+    const { alloc, total, left, usedIn } = best;
+    const tight = tightestInputs(usedIn, inputSupply, (id) => data.mats[id]?.[0] ?? id);
     const sum = Object.fromEntries(KEYS.map((k) => [k, alloc.reduce((x, y) => x + y.n * y.t[k], 0)]));
     const upfront = sum.mat + sum.shipIn + sum.install;
     const totalCost = upfront + sum.shipOut + sum.fees;
@@ -261,7 +270,8 @@ export async function initAll(root, bridge) {
       : `<span class="warn">No products with loaded volumes yet - use "Load volumes" first. The plan only considers products whose market size is known.</span>`;
     return `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>
       <div class="muted">${hint} Slots, window, lazy mode, capital and market-share cap come from the shared settings.</div>
-      ${alloc.length ? `<div><b class="good">${fmtIsk(total)} ISK</b> <span class="muted">expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share or capital limit)` : ""}</span></div>
+      ${alloc.length ? `<div><b class="good">${fmtIsk(total)} ISK</b> <span class="muted">expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share, input-supply or capital limit)` : ""}</span></div>
+      ${tight.length ? `<div class="muted">Tightest inputs (share of the allowed supply on the market): ${tight.map((x) => `${esc(x.name)} ${Number.isFinite(x.pct) ? (x.pct * 100).toFixed(0) + "%" : "no supply"}`).join(", ")}</div>` : ""}
       <div class="plancols"><table>${head}${body}</table>${breakdown}</div>
       <p><button id="a-copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="a-copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
   }

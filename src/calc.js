@@ -13,6 +13,22 @@ export const RIG_SEC_MULT = { high: 1.0, low: 1.9, null: 2.1 };
 /** Length of the planning window in hours (normally 168, but can be shortened to avoid schedule drift). */
 export const windowHours = (s) => Math.max(1, s.windowDays * 24 + s.windowHours);
 
+/** Map of material id -> units needed, for `jobs` jobs of the given material lines. */
+export const inputMap = (lines, jobs) => new Map(lines.map((l) => [l.id, l.need * jobs]));
+
+/** How many slots' worth of candidate `c` the remaining input supply allows. `supply(id)` is the allowed total. */
+export function inputRoom(c, used, supply) {
+  let n = Infinity;
+  for (const [id, q] of c.inputs) n = Math.min(n, (supply(id) - (used.get(id) || 0)) / q);
+  return n;
+}
+
+/** The most heavily used inputs of a finished plan: [{ id, name, used, allowed, pct }], tightest first. */
+export function tightestInputs(used, supply, names, k = 3) {
+  return [...used].map(([id, q]) => ({ id, name: names(id), used: q, allowed: supply(id), pct: supply(id) ? q / supply(id) : Infinity }))
+    .sort((a, b) => b.pct - a.pct).slice(0, k);
+}
+
 const blank = (v) => v === "" || v == null;
 
 export function salesTax(s) {

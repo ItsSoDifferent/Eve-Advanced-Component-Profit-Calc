@@ -1,5 +1,5 @@
 import {
-  STRUCTURES, buildMods, evaluate, jobSeconds, windowHours, salesTax, brokerFee, secClass,
+  STRUCTURES, buildMods, evaluate, jobSeconds, windowHours, inputMap, inputRoom, tightestInputs, salesTax, brokerFee, secClass,
   fmtIsk, fmtShort, fmtTime,
 } from "./calc.js";
 import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from "./api.js";
@@ -14,7 +14,7 @@ const DEFAULTS = {
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
   system: "Jita", sciOverride: "",
   structure: "raitaru", rigs: ["", "", ""], facilityTax: 1, sccSurcharge: 4,
-  runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, capital: "", defaultME: 10, defaultTE: 20, volumeCap: 10,
+  runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, capital: "", defaultME: 10, defaultTE: 20, volumeCap: 10, inputCap: 25,
   inHub: "s:60003760", outHub: "s:60003760",
   inputMethod: "instant", outputMethod: "order", priceStat: "percentile",
   shipIn: { perM3: 0, collateral: 0 }, shipOut: { perM3: 0, collateral: 0 },
@@ -81,6 +81,7 @@ function sections() {
       num("windowHours", "Plan window: extra hours", "", 'min="0" max="23"'),
       { path: "lazy", label: "Lazy mode", type: "checkbox", hint: "Whole slots only; each slot runs one job sized to fill the window, so you set it and forget it" },
       num("capital", "Starting capital (ISK)", "Blank = unlimited. Caps materials + inbound shipping + job fees paid up front", 'min="0" step="any" placeholder="unlimited"'),
+      num("inputCap", "Max share of input supply (%)", "Caps materials the plan will buy, as a share of the units on sell orders at the buy hub", 'min="0" step="1"'),
       num("volumeCap", "Max share of weekly market volume (%)", "Caps units the plan will sell per product", 'min="0" step="1"'),
     ] },
     { title: "Market", open: true, fields: [
@@ -318,22 +319,27 @@ function slotTotals(src, f) {
   };
 }
 
+// Units of an input the plan may buy: a share of what is listed on sell orders at the buy hub.
+const inputSupply = (id) => (market.prices.in?.[id]?.sell?.volume || 0) * (s.inputCap / 100);
+
 function allocate(cands, lazy, capital) {
   let left = s.slots, capLeft = capital;
   const used = new Map(); // product id -> units already planned, shared by all job sizes of that product
+  const usedIn = new Map(); // material id -> units the plan already buys
   const alloc = [];
   for (const c of cands) {
     if (left <= 0) break;
     const room = c.capUnits - (used.get(c.r.comp.id) || 0);
-    let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
+    let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity, inputRoom(c, usedIn, inputSupply));
     if (lazy) n = Math.floor(n + 1e-9);
     if (!(n > 0) || n * c.units < c.r.comp.perRun) continue; // less than one run of output: nothing to sell
     alloc.push({ ...c, n, profit: n * c.per });
     used.set(c.r.comp.id, (used.get(c.r.comp.id) || 0) + n * c.units);
+    for (const [id, q] of c.inputs) usedIn.set(id, (usedIn.get(id) || 0) + n * q);
     left -= n; capLeft -= n * c.up;
   }
   const total = alloc.reduce((a, x) => a + x.profit, 0);
-  return { alloc, total, left };
+  return { alloc, total, left, usedIn };
 }
 
 function renderPlan(rows) {
@@ -346,7 +352,10 @@ function renderPlan(rows) {
       const f = r.unitsPerWeekPerSlot / r.units; // jobs per slot per window
       return { r, per: r.weeklyPerSlot, units: r.unitsPerWeekPerSlot, capUnits: r.weeklyVol == null ? Infinity : r.weeklyVol * (s.volumeCap / 100), t: slotTotals(r, f) };
     })
-  ).map((c) => ({ ...c, up: c.t.mat + c.t.shipIn + c.t.install }));
+  ).map((c) => ({
+    ...c, up: c.t.mat + c.t.shipIn + c.t.install,
+    inputs: inputMap(c.lr ? c.lr.lines : c.r.lines, c.lr ? 1 : c.units / c.r.units), // per slot, per window
+  }));
 
   // Without a capital limit, profit per slot is the right ranking. With one, weigh in profit per ISK of capital too
   // (a greedy heuristic, so try several blends and keep the best result).
@@ -358,7 +367,8 @@ function renderPlan(rows) {
       if (alt.total > best.total) best = alt;
     }
   }
-  const { alloc, total, left } = best;
+  const { alloc, total, left, usedIn } = best;
+  const tight = tightestInputs(usedIn, inputSupply, (id) => allMaterials().find((m) => m[0] === id)?.[1] ?? id);
 
   const sum = Object.fromEntries(SUM_KEYS.map((k) => [k, alloc.reduce((a, x) => a + x.n * x.t[k], 0)]));
   const upfront = sum.mat + sum.shipIn + sum.install;
@@ -400,7 +410,8 @@ function renderPlan(rows) {
     </table>`;
   $("#plan").innerHTML = `<h3>Suggested plan - ${s.slots} slots, ${winLabel} window${lazy ? ", lazy mode" : ""}${capital < Infinity ? `, ${fmtShort(capital)} capital` : ""}</h3>${pending}
     <div><b class="${total > 0 ? "good" : ""}">${fmtIsk(total)} ISK</b>
-    <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share or capital limit)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
+    <span class="muted"> expected profit per window${left > 0.01 ? `; ${lazy ? left : left.toFixed(1)} slots unused (slot, market-share, input-supply or capital limit)` : ""}${missing ? `; ${missing} products lack prices` : ""}</span></div>
+    ${tight.length ? `<div class="muted">Tightest inputs (share of the allowed supply on the market): ${tight.map((x) => `${esc(x.name)} ${Number.isFinite(x.pct) ? (x.pct * 100).toFixed(0) + "%" : "no supply"}`).join(", ")}</div>` : ""}
     ${alloc.length ? `<div class="plancols"><table>${head}${body}</table>${breakdown}</div><p><button id="copybuy">Create buy order (copy multibuy)</button> <span class="muted" id="copymsg">${buy.size} items for the whole plan</span></p>` : ""}`;
 }
 
