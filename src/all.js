@@ -7,8 +7,9 @@ import { fetchPrices, fetchVolumes } from "./api.js";
 const KEY = "evecp.all.v1";
 const DEFAULTS = {
   rigTier: "none", runs: 10, cat: "All", sub: "All", search: "", onlyProfit: true,
-  minOrders: 5, sort: "maxProfit", asc: false, limit: 200, volN: 600,
+  minOrders: 5, noCapital: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
 };
+const CAPITAL_SHIP_CONSTRUCTION = 22242;
 const RIG_SIZE = { raitaru: "M-Set", azbel: "L-Set", sotiyo: "XL-Set" };
 
 export async function initAll(root, bridge) {
@@ -135,6 +136,7 @@ export async function initAll(root, bridge) {
     const list = rows.filter((r) =>
       (a.cat === "All" || r.it.cat === a.cat) && (a.sub === "All" || r.it.sub === a.sub) &&
       (!a.onlyProfit || (r.profit > 0 && r.hasPrices)) && r.orders >= a.minOrders &&
+      !(a.noCapital && r.it.skills.some((k) => k[0] === CAPITAL_SHIP_CONSTRUCTION)) &&
       (!q || r.it.name.toLowerCase().includes(q)));
     const val = (r) => (a.sort === "name" ? r.it.name : a.sort === "sub" ? r.it.sub : r[a.sort] ?? -Infinity);
     list.sort((x, y) => {
@@ -290,6 +292,7 @@ export async function initAll(root, bridge) {
         <label>Rigs <select data-a="rigTier">${[["none", "none"], ["I", "best T1 rig"], ["II", "best T2 rig"]].map(([v, l]) => `<option value="${v}" ${a.rigTier === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label>Runs/job <input type="number" data-a="runs" min="1" value="${a.runs}"></label>
         <label>Min orders <input type="number" data-a="minOrders" min="0" value="${a.minOrders}"></label>
+        <label title="Hides capital ships, capital modules and capital components"><input type="checkbox" data-a="noCapital" ${a.noCapital ? "checked" : ""}> hide Capital Ship Construction items</label>
         <label><input type="checkbox" data-a="onlyProfit" ${a.onlyProfit ? "checked" : ""}> profitable only</label>
         <input type="search" data-a="search" placeholder="Filter by name" value="${esc(a.search)}">
         <span class="muted">${list.length} of ${rows.length} (showing ${Math.min(list.length, a.limit)})</span>

@@ -54,6 +54,7 @@ for bid, bp in bps.items():
         "bp": int(bid), "perRun": m["products"][pid]["quantity"], "time": m["time"], "volume": vol(p),
         "mats": [[int(k), v["quantity"]] for k, v in m["materials"].items()],
         "rigSet": rig_set_ix[rs],
+        "skills": [[int(k), v] for k, v in (m.get("required_skills") or {}).items()],
     })
 
 rigs = {}
@@ -62,7 +63,8 @@ for r in sorted(rig_ids):
     rigs[r] = [en(r), a.get("2594", 0), a.get("2593", 0)]
 
 items.sort(key=lambda x: (x["cat"], x["sub"], x["name"]))
-doc = {"items": items, "mats": mats, "rigs": rigs, "rigSets": rig_sets}
+skill_names = {str(s[0]): en(s[0]) for it in items for s in it["skills"]}
+doc = {"items": items, "mats": mats, "rigs": rigs, "rigSets": rig_sets, "skillNames": skill_names}
 path = os.path.join(out, "all.json")
 with open(path, "w", encoding="utf-8") as f:
     json.dump(doc, f, separators=(",", ":"))
