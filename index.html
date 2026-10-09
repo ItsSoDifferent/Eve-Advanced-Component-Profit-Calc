@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advanced Component Profit</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Advanced Component Profit</h1>
+  <span id="status" class="muted"></span>
+  <span class="spacer"></span>
+  <button id="refresh" class="primary">Refresh market data</button>
+  <button id="reset">Reset settings</button>
+</header>
+
+<main>
+  <aside id="settings"></aside>
+  <section id="results">
+    <div id="plan"></div>
+    <div id="toolbar">
+      <label>Show <select data-view="group"></select></label>
+      <label><input type="checkbox" data-view="onlyProfit"> profitable only</label>
+      <input type="search" data-view="search" placeholder="Filter by name">
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="tablewrap"><table id="table"></table></div>
+    <p class="muted notes">
+      Job cost = EIV x (system cost index x structure reduction + facility tax + SCC surcharge). Material quantities use
+      ceil(base x runs x ME x structure x rigs), minimum one per run. Prices come from Fuzzwork (order book aggregates);
+      adjusted prices, cost indices and volumes from ESI. Edit any price in the Materials panel or the Sell column to override it.
+    </p>
+  </section>
+</main>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
