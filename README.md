@@ -39,3 +39,13 @@ Construction, and products whose BPO is not sold in Jita.
 
 The module is self-contained: `src/all.js` (loaded lazily by `src/tabs.js`) reads shared settings through the
 `window.evecp` bridge in `src/app.js`.
+
+## Reactions tab
+
+Every reaction formula (`data/reactions.json`, built with `python -I scripts/build_all_data.py <ref dir> data reaction`),
+using the same table, filters and suggested plan as the All manufacturing tab (`src/all.js` is configured per activity).
+
+Reaction settings live in the sidebar: the Reactions skill (-4% time per level) under Skills, and under Manufacturing
+location a separate reaction system, cost index, structure (Athanor, no bonus; Tatara, -25% time), three reactor rigs
+(M-set rigs fit an Athanor, L-set a Tatara, each only helps its own reaction type) and facility tax. Reactor rig bonuses
+are x1.0 in low-sec and wormholes and x1.1 in null-sec; reactions cannot run in high-sec. Formulas have no ME/TE.

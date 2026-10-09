@@ -37,10 +37,12 @@ export async function fetchAdjusted() {
 export async function fetchCostIndices() {
   const r = await fetch("https://esi.evetech.net/latest/industry/systems/");
   if (!r.ok) throw new Error(`ESI indices ${r.status}`);
-  const out = {};
+  const out = { manufacturing: {}, reaction: {} };
   for (const s of await r.json()) {
-    const m = s.cost_indices.find((c) => c.activity === "manufacturing");
-    out[s.solar_system_id] = m ? m.cost_index : 0;
+    for (const act of Object.keys(out)) {
+      const m = s.cost_indices.find((c) => c.activity === act);
+      out[act][s.solar_system_id] = m ? m.cost_index : 0;
+    }
   }
   return out;
 }

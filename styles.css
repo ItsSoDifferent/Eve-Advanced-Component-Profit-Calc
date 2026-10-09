@@ -60,7 +60,7 @@ td input.price { width: 92px; }
 #tabs button { border-radius: 4px 4px 0 0; border-bottom: none; }
 #tabs button.active { background: var(--panel); border-color: var(--accent); color: var(--accent); }
 [hidden] { display: none !important; }
-#allview .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px; }
-#allview .bar select, #allview .bar input[type=search], #allview .bar input[type=number] { width: auto; }
-#allview .bar input[type=number] { width: 70px; }
-#allview .intro { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+.alltab .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px; }
+.alltab .bar select, .alltab .bar input[type=search], .alltab .bar input[type=number] { width: auto; }
+.alltab .bar input[type=number] { width: 70px; }
+.alltab .intro { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }

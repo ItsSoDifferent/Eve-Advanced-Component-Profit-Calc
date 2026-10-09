@@ -1,11 +1,15 @@
-"""Build data/all.json: every product that can be manufactured from a BPO sold on the market.
+"""Build data/all.json (every product manufactured from a market BPO) or data/reactions.json (every reaction formula).
 
-Usage: python -I scripts/build_all_data.py <dir with extracted reference-data> [out_dir]
+Usage: python -I scripts/build_all_data.py <dir with extracted reference-data> [out_dir] [manufacturing|reaction]
 """
 import json, sys, os
 
 src = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "..", "data")
+ACT = sys.argv[3] if len(sys.argv) > 3 else "manufacturing"
+REACT = ACT == "reaction"
+# Rig attribute ids: material / time bonus differ between engineering and reactor rigs.
+MAT_ATTR, TIME_ATTR = ("2714", "2713") if REACT else ("2594", "2593")
 
 def load(name):
     with open(os.path.join(src, name), encoding="utf-8") as f:
@@ -26,7 +30,7 @@ def chain(g):
 rig_sets, rig_set_ix, rig_ids = [], {}, set()
 items, mats = [], {}
 for bid, bp in bps.items():
-    m = bp["activities"].get("manufacturing")
+    m = bp["activities"].get(ACT)
     if not m or not m.get("products") or not m.get("materials"):
         continue
     bt = types.get(bid)
@@ -38,10 +42,12 @@ for bid, bp in bps.items():
     if not p or not p.get("published") or not p.get("market_group_id"):
         continue
     # Faction, limited-time, officer and T2 items have blueprints in the SDE that players can't buy as BPOs.
-    if p.get("meta_group_id") not in (None, 1, 54):
+    if not REACT and p.get("meta_group_id") not in (None, 1, 54):
         continue
     path = chain(p["market_group_id"])
-    rs = tuple(sorted(p.get("engineering_rig_source_type_ids", {}).get("manufacturing", [])))
+    # Reaction products all sit under Manufacture & Research > Materials, so use the two levels below that.
+    cat, sub = (path[2], path[3]) if REACT and len(path) > 3 else (path[0], path[1] if len(path) > 1 else path[0])
+    rs = tuple(sorted(p.get("engineering_rig_source_type_ids", {}).get(ACT, [])))
     if rs not in rig_set_ix:
         rig_set_ix[rs] = len(rig_sets)
         rig_sets.append(list(rs))
@@ -50,7 +56,7 @@ for bid, bp in bps.items():
         mt = types[mid]
         mats[mid] = [mt["name"]["en"], vol(mt)]
     items.append({
-        "id": int(pid), "name": p["name"]["en"], "cat": path[0], "sub": path[1] if len(path) > 1 else path[0],
+        "id": int(pid), "name": p["name"]["en"], "cat": cat, "sub": sub,
         "bp": int(bid), "perRun": m["products"][pid]["quantity"], "time": m["time"], "volume": vol(p),
         "mats": [[int(k), v["quantity"]] for k, v in m["materials"].items()],
         "rigSet": rig_set_ix[rs],
@@ -60,12 +66,12 @@ for bid, bp in bps.items():
 rigs = {}
 for r in sorted(rig_ids):
     a = {k: v["value"] for k, v in types[str(r)]["dogma_attributes"].items()}
-    rigs[r] = [en(r), a.get("2594", 0), a.get("2593", 0)]
+    rigs[r] = [en(r), a.get(MAT_ATTR, 0), a.get(TIME_ATTR, 0)]
 
 items.sort(key=lambda x: (x["cat"], x["sub"], x["name"]))
 skill_names = {str(s[0]): en(s[0]) for it in items for s in it["skills"]}
 doc = {"items": items, "mats": mats, "rigs": rigs, "rigSets": rig_sets, "skillNames": skill_names}
-path = os.path.join(out, "all.json")
+path = os.path.join(out, "reactions.json" if REACT else "all.json")
 with open(path, "w", encoding="utf-8") as f:
     json.dump(doc, f, separators=(",", ":"))
 print(len(items), "items,", len(mats), "materials,", len(rigs), "rigs,", os.path.getsize(path) // 1024, "KB")

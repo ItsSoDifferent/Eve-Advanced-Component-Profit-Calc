@@ -6,13 +6,14 @@ import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const SETTINGS_KEY = "evecp.settings.v1";
-const MARKET_KEY = "evecp.market.v2";
+const MARKET_KEY = "evecp.market.v3";
 
 const DEFAULTS = {
-  skills: { industry: 5, advancedIndustry: 5, accounting: 5, brokerRelations: 5 },
+  skills: { industry: 5, advancedIndustry: 5, reactions: 5, accounting: 5, brokerRelations: 5 },
   standings: { faction: 0, corp: 0 },
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
   system: "Jita", sciOverride: "",
+  reactSystem: "Tama", reactSciOverride: "", reactStructure: "tatara", reactRigs: ["", "", ""], reactFacilityTax: 1,
   structure: "raitaru", rigs: ["", "", ""], facilityTax: 1, sccSurcharge: 4,
   runs: 100, slots: 10, windowDays: 7, windowHours: 0, lazy: false, capital: "", defaultME: 10, defaultTE: 20, volumeCap: 10, inputCap: 25,
   inHub: "s:60003760", outHub: "s:60003760",
@@ -22,10 +23,10 @@ const DEFAULTS = {
 };
 
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
-let data, rigs, systems, s;
+let data, rigs, reactRigList, systems, s;
 let lastCtx;
 let planBuyText = "";
-let market = { adj: {}, indices: {}, prices: {}, volumes: {}, ts: 0 };
+let market = { adj: {}, indices: {}, reactionIndices: {}, prices: {}, volumes: {}, ts: 0 };
 
 // ---------- state helpers ----------
 const merge = (base, over) => {
@@ -55,21 +56,29 @@ const sel = (path, label, opts, hint) => ({ path, label, hint, type: "select", o
 function sections() {
   const hubOpts = HUBS.map((h) => [h.id, h.label]);
   const rigOpts = [["", "(none)"], ...rigs.map((r) => [r.id, r.name.replace("Standup ", "")])];
+  const reactRigOpts = [["", "(none)"], ...reactRigList.map((r) => [r.id, r.name.replace("Standup ", "")])];
   return [
     { title: "Skills", open: true, fields: [
       num("skills.industry", "Industry (-4% time/lvl)", "", 'min="0" max="5"'),
       num("skills.advancedIndustry", "Advanced Industry (-3% time/lvl)", "", 'min="0" max="5"'),
+      num("skills.reactions", "Reactions (-4% reaction time/lvl)", "", 'min="0" max="5"'),
       num("skills.accounting", "Accounting (sales tax)", "", 'min="0" max="5"'),
       num("skills.brokerRelations", "Broker Relations", "", 'min="0" max="5"'),
       num("standings.faction", "Faction standing (broker fee)", "Effective standing, 0-10", 'min="0" max="10" step="0.1"'),
       num("standings.corp", "Corp standing (broker fee)", "Effective standing, 0-10", 'min="0" max="10" step="0.1"'),
     ] },
     { title: "Manufacturing location", open: true, fields: [
-      { path: "system", label: "System", type: "system" },
+      { path: "system", label: "System", type: "system", info: "sysinfo" },
       num("sciOverride", "Cost index override (%)", "Blank = live ESI value", 'step="0.01" placeholder="auto"'),
       sel("structure", "Structure", Object.entries(STRUCTURES).map(([k, v]) => [k, v.label])),
-      { type: "rigs", opts: rigOpts },
+      { type: "rigs", path: "rigs", label: "Rig", opts: rigOpts, hint: "Rig bonuses are scaled by system security (x1.0 high, x1.9 low, x2.1 null/WH). Ignored at NPC stations." },
       num("facilityTax", "Facility tax (%)", "Charged on EIV by the structure owner", 'step="0.1" min="0"'),
+      { type: "subhead", label: "Reactions (used by the Reactions tab)" },
+      { path: "reactSystem", label: "Reaction system", type: "system", info: "rsysinfo" },
+      num("reactSciOverride", "Reaction cost index override (%)", "Blank = live ESI value", 'step="0.01" placeholder="auto"'),
+      sel("reactStructure", "Reaction structure", [["athanor", "Athanor (no bonus)"], ["tatara", "Tatara (-25% time)"]]),
+      { type: "rigs", path: "reactRigs", label: "Reactor rig", opts: reactRigOpts, hint: "M-set rigs fit an Athanor, L-set a Tatara; a rig only helps reactions of its own type (composite / hybrid / biochemical; L-set covers all). Low-sec x1.0, null-sec x1.1, wormhole x1.0; reactions cannot run in high-sec." },
+      num("reactFacilityTax", "Reaction facility tax (%)", "Charged on EIV by the structure owner", 'step="0.1" min="0"'),
       num("sccSurcharge", "SCC surcharge (%)", "On EIV; 4% at time of writing", 'step="0.1" min="0"'),
     ] },
     { title: "Blueprints & plan", open: true, fields: [
@@ -108,14 +117,15 @@ function sections() {
 }
 
 function fieldHtml(f) {
+  if (f.type === "subhead") return `<h3 class="full" style="margin-top:8px">${esc(f.label)}</h3>`;
   if (f.type === "system") {
-    return `<label class="full">System<input list="systemlist" data-path="system" value="${esc(s.system)}">
-      <span class="hint" id="sysinfo"></span></label>`;
+    return `<label class="full">${esc(f.label)}<input list="systemlist" data-path="${f.path}" value="${esc(getPath(s, f.path))}">
+      <span class="hint" id="${f.info || "sysinfo"}"></span></label>`;
   }
   if (f.type === "rigs") {
-    return [0, 1, 2].map((i) => `<label class="full">Rig ${i + 1}<select data-path="rigs.${i}" data-int>${
-      f.opts.map(([v, l]) => `<option value="${v}" ${String(s.rigs[i]) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")
-    }</select></label>`).join("") + `<div class="hint">Rig bonuses are scaled by system security (x1.0 high, x1.9 low, x2.1 null/WH). Ignored at NPC stations.</div>`;
+    return [0, 1, 2].map((i) => `<label class="full">${esc(f.label)} ${i + 1}<select data-path="${f.path}.${i}" data-int>${
+      f.opts.map(([v, l]) => `<option value="${v}" ${String(getPath(s, f.path)[i]) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")
+    }</select></label>`).join("") + `<div class="hint">${esc(f.hint)}</div>`;
   }
   if (f.type === "feeinfo") return `<div class="full hint" id="feeinfo"></div>`;
   if (f.type === "materials") return `<div class="mats" id="mats"></div>`;
@@ -145,6 +155,15 @@ function renderSideInfo() {
     else {
       const idx = sciFor(sys);
       el.textContent = `${secClass(sys[2])}sec ${sys[2].toFixed(1)} - manufacturing cost index ${(idx * 100).toFixed(2)}%`;
+    }
+  }
+  const rsys = systems.find((x) => x[1].toLowerCase() === String(s.reactSystem).trim().toLowerCase());
+  const rel = $("#rsysinfo");
+  if (rel) {
+    if (!rsys) rel.textContent = "Unknown system";
+    else {
+      const idx = s.reactSciOverride !== "" && s.reactSciOverride != null ? s.reactSciOverride / 100 : market.reactionIndices[rsys[0]] ?? 0;
+      rel.textContent = `${secClass(rsys[2])}sec ${rsys[2].toFixed(1)} - reaction cost index ${(idx * 100).toFixed(2)}%${rsys[2] >= 0.45 ? " - reactions cannot run in high-sec" : ""}`;
     }
   }
   const fi = $("#feeinfo");
@@ -224,7 +243,15 @@ window.evecp = {
   get s() { return s; },
   get market() { return market; },
   get fmt() { return { fmtIsk, fmtShort, fmtTime }; },
-  system: () => { const sys = currentSystem(); return { sec: sys ? sys[2] : 1, sci: sciFor(sys) }; },
+  system: (kind = "manufacturing") => {
+    if (kind === "reaction") {
+      const sys = systems.find((x) => x[1].toLowerCase() === String(s.reactSystem).trim().toLowerCase());
+      const sci = s.reactSciOverride !== "" && s.reactSciOverride != null ? s.reactSciOverride / 100 : market.reactionIndices[sys?.[0]] ?? 0;
+      return { sec: sys ? sys[2] : 1, sci, wh: !!sys && /^J\d{6}$/.test(sys[1]) };
+    }
+    const sys = currentSystem();
+    return { sec: sys ? sys[2] : 1, sci: sciFor(sys) };
+  },
   refreshShared: async () => { if (!market.ts) await refresh(); },
 };
 
@@ -425,7 +452,7 @@ async function refresh() {
     const matIds = allMaterials().map((m) => m[0]);
     const prodIds = data.components.map((c) => c.id);
     const [adj, indices] = await Promise.all([fetchAdjusted(), fetchCostIndices()]);
-    market.adj = adj; market.indices = indices;
+    market.adj = adj; market.indices = indices.manufacturing; market.reactionIndices = indices.reaction;
     if (s.inHub === s.outHub) {
       const p = await fetchPrices(s.inHub, [...matIds, ...prodIds]);
       market.prices = { in: p, out: p };
@@ -482,6 +509,7 @@ function init() {
   s = merge(DEFAULTS, load(SETTINGS_KEY));
   const cached = load(MARKET_KEY);
   if (cached && cached.hubs?.[0] === s.inHub && cached.hubs?.[1] === s.outHub) market = { ...market, ...cached };
+  market.indices ||= {}; market.reactionIndices ||= {};
   $("#settings").addEventListener("change", onSettingChange);
   $("#toolbar").addEventListener("input", onSettingChange);
   $("#table").addEventListener("change", onSettingChange);
@@ -529,7 +557,10 @@ function init() {
 
 (async () => {
   const j = (f) => fetch(`data/${f}`).then((r) => r.json());
-  [data, rigs, systems] = await Promise.all([j("components.json"), j("rigs.json"), j("systems.json")]);
+  let reactions;
+  [data, rigs, systems, reactions] = await Promise.all([j("components.json"), j("rigs.json"), j("systems.json"), j("reactions.json")]);
+  reactRigList = Object.entries(reactions.rigs).map(([id, [name, mat, time]]) => ({ id: Number(id), name, mat, time }))
+    .filter((r) => !r.name.includes("Thukker")).sort((x, y) => x.name.localeCompare(y.name));
   rigs = rigs.filter((r) => !r.name.includes("Outpost"));
   init();
 })();
