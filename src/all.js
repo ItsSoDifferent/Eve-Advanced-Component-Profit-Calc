@@ -7,9 +7,10 @@ import { fetchPrices, fetchVolumes } from "./api.js";
 const KEY = "evecp.all.v1";
 const DEFAULTS = {
   rigTier: "none", runs: 10, cat: "All", sub: "All", search: "", onlyProfit: true,
-  minOrders: 5, noCapital: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
+  minOrders: 5, noCapital: true, needBpo: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
 };
 const CAPITAL_SHIP_CONSTRUCTION = 22242;
+const JITA = "s:60003760"; // 4-4; BPOs are NPC-seeded, so Jita is the reference for "can I buy this BPO"
 const RIG_SIZE = { raitaru: "M-Set", azbel: "L-Set", sotiyo: "XL-Set" };
 
 export async function initAll(root, bridge) {
@@ -24,6 +25,7 @@ export async function initAll(root, bridge) {
   const open = new Set();
   let prices = { in: {}, out: {}, ts: 0 };
   let volumes = {};
+  let bpoSale = null; // blueprint type id -> lowest Jita sell price (null until prices are loaded)
   let busy = "";
 
   // Build the evaluate()-shaped component objects once.
@@ -137,6 +139,7 @@ export async function initAll(root, bridge) {
       (a.cat === "All" || r.it.cat === a.cat) && (a.sub === "All" || r.it.sub === a.sub) &&
       (!a.onlyProfit || (r.profit > 0 && r.hasPrices)) && r.orders >= a.minOrders &&
       !(a.noCapital && r.it.skills.some((k) => k[0] === CAPITAL_SHIP_CONSTRUCTION)) &&
+      !(a.needBpo && bpoSale && !(bpoSale[r.it.bp] > 0)) &&
       (!q || r.it.name.toLowerCase().includes(q)));
     const val = (r) => (a.sort === "name" ? r.it.name : a.sort === "sub" ? r.it.sub : r[a.sort] ?? -Infinity);
     list.sort((x, y) => {
@@ -293,6 +296,7 @@ export async function initAll(root, bridge) {
         <label>Runs/job <input type="number" data-a="runs" min="1" value="${a.runs}"></label>
         <label>Min orders <input type="number" data-a="minOrders" min="0" value="${a.minOrders}"></label>
         <label title="Hides capital ships, capital modules and capital components"><input type="checkbox" data-a="noCapital" ${a.noCapital ? "checked" : ""}> hide Capital Ship Construction items</label>
+        <label title="Needs market data loaded; checks for BPO sell orders at Jita 4-4"><input type="checkbox" data-a="needBpo" ${a.needBpo ? "checked" : ""}> only BPOs sold in Jita</label>
         <label><input type="checkbox" data-a="onlyProfit" ${a.onlyProfit ? "checked" : ""}> profitable only</label>
         <input type="search" data-a="search" placeholder="Filter by name" value="${esc(a.search)}">
         <span class="muted">${list.length} of ${rows.length} (showing ${Math.min(list.length, a.limit)})</span>
@@ -326,6 +330,8 @@ export async function initAll(root, bridge) {
         const [pi, po] = await Promise.all([get(s.inHub, matIds), get(s.outHub, prodIds)]);
         prices = { in: pi, out: po, ts: Date.now() };
       }
+      const bp = await get(JITA, items.map((i) => i.bp));
+      bpoSale = Object.fromEntries(Object.entries(bp).map(([id, b]) => [id, b.sell?.min > 0 && b.sell.orderCount > 0 ? b.sell.min : 0]));
       busy = "";
     } catch (e) {
       busy = "Error: " + e.message;
