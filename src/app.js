@@ -274,17 +274,28 @@ function detailHtml(r) {
     </table></div></div>`;
 }
 
-// Lazy mode: one job per slot, with the run count chosen so it just fits inside the window.
-function lazyCandidate(r) {
+// Lazy mode: one job per slot. A job never needs to fill the whole window, so offer several job sizes (largest first):
+// shorter jobs let the planner fit tight capital or market-share limits instead of dropping a product altogether.
+const LAZY_SIZES = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.12, 0.06];
+function lazyCandidates(r) {
+  if (!r.hasPrices) return [];
   const winSec = windowHours(s) * 3600;
   const { mods } = lastCtx;
-  let runs = Math.floor(winSec / (r.seconds / r.runs));
-  while (runs > 1 && jobSeconds(r.comp, r.bp.te, runs, mods) > winSec) runs--;
-  if (runs < 1 || jobSeconds(r.comp, r.bp.te, runs, mods) > winSec) return null;
-  const lr = evaluate(r.comp, r.bp, { ...lastCtx, s: { ...s, runs } });
-  if (!(lr.profit > 0) || !r.hasPrices) return null;
-  const cap = r.weeklyVol == null ? Infinity : Math.floor((r.weeklyVol * (s.volumeCap / 100)) / lr.units);
-  return { r, lr, per: lr.profit, maxSlots: cap, units: lr.units, t: slotTotals(lr, 1) };
+  const perRun = r.comp.perRun;
+  let fit = Math.floor(winSec / (r.seconds / r.runs));
+  while (fit > 1 && jobSeconds(r.comp, r.bp.te, fit, mods) > winSec) fit--;
+  if (fit < 1 || jobSeconds(r.comp, r.bp.te, fit, mods) > winSec) return [];
+  const capUnits = r.weeklyVol == null ? Infinity : r.weeklyVol * (s.volumeCap / 100);
+  const sizes = new Set(LAZY_SIZES.map((f) => Math.max(1, Math.floor(fit * f))));
+  const capRuns = Math.floor(capUnits / perRun);
+  if (capRuns >= 1 && capRuns < fit) sizes.add(capRuns);
+  const out = [];
+  for (const runs of sizes) {
+    if (runs * perRun > capUnits) continue;
+    const lr = evaluate(r.comp, r.bp, { ...lastCtx, s: { ...s, runs } });
+    if (lr.profit > 0) out.push({ r, lr, per: lr.profit, units: lr.units, capUnits, t: slotTotals(lr, 1) });
+  }
+  return out;
 }
 
 const SUM_KEYS = ["gross", "mat", "shipIn", "shipOut", "install", "fees", "profit"];
@@ -299,13 +310,16 @@ function slotTotals(src, f) {
 
 function allocate(cands, lazy, capital) {
   let left = s.slots, capLeft = capital;
+  const used = new Map(); // product id -> units already planned, shared by all job sizes of that product
   const alloc = [];
   for (const c of cands) {
     if (left <= 0) break;
-    let n = Math.min(left, c.maxSlots, c.up > 0 ? capLeft / c.up : Infinity);
-    if (lazy) n = Math.floor(n);
+    const room = c.capUnits - (used.get(c.r.comp.id) || 0);
+    let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
+    if (lazy) n = Math.floor(n + 1e-9);
     if (!(n > 0)) continue;
     alloc.push({ ...c, n, profit: n * c.per });
+    used.set(c.r.comp.id, (used.get(c.r.comp.id) || 0) + n * c.units);
     left -= n; capLeft -= n * c.up;
   }
   const total = alloc.reduce((a, x) => a + x.profit, 0);
@@ -317,18 +331,22 @@ function renderPlan(rows) {
   const win = windowHours(s);
   const capital = s.capital > 0 ? Number(s.capital) : Infinity;
   const cands = (lazy
-    ? rows.map(lazyCandidate).filter(Boolean)
+    ? rows.flatMap(lazyCandidates)
     : rows.filter((r) => r.profit > 0 && r.hasPrices).map((r) => {
       const f = r.unitsPerWeekPerSlot / r.units; // jobs per slot per window
-      return { r, per: r.weeklyPerSlot, maxSlots: r.maxSlots, units: r.unitsPerWeekPerSlot, t: slotTotals(r, f) };
+      return { r, per: r.weeklyPerSlot, units: r.unitsPerWeekPerSlot, capUnits: r.weeklyVol == null ? Infinity : r.weeklyVol * (s.volumeCap / 100), t: slotTotals(r, f) };
     })
   ).map((c) => ({ ...c, up: c.t.mat + c.t.shipIn + c.t.install }));
 
-  // With limited capital, ranking by profit per slot is no longer necessarily best; try both and keep the better.
+  // Without a capital limit, profit per slot is the right ranking. With one, weigh in profit per ISK of capital too
+  // (a greedy heuristic, so try several blends and keep the best result).
   let best = allocate([...cands].sort((a, b) => b.per - a.per), lazy, capital);
   if (capital < Infinity) {
-    const alt = allocate([...cands].sort((a, b) => b.per / b.up - a.per / a.up), lazy, capital);
-    if (alt.total > best.total) best = alt;
+    for (const w of [0.25, 0.5, 0.75, 1]) {
+      const score = (c) => c.per ** (1 - w) * (c.per / c.up) ** w;
+      const alt = allocate([...cands].sort((a, b) => score(b) - score(a)), lazy, capital);
+      if (alt.total > best.total) best = alt;
+    }
   }
   const { alloc, total, left } = best;
 
