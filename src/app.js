@@ -6,7 +6,7 @@ import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const SETTINGS_KEY = "evecp.settings.v1";
-const MARKET_KEY = "evecp.market.v1";
+const MARKET_KEY = "evecp.market.v2";
 
 const DEFAULTS = {
   skills: { industry: 5, advancedIndustry: 5, accounting: 5, brokerRelations: 5 },
@@ -327,7 +327,7 @@ function allocate(cands, lazy, capital) {
     const room = c.capUnits - (used.get(c.r.comp.id) || 0);
     let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
     if (lazy) n = Math.floor(n + 1e-9);
-    if (!(n > 0)) continue;
+    if (!(n > 0) || n * c.units < c.r.comp.perRun) continue; // less than one run of output: nothing to sell
     alloc.push({ ...c, n, profit: n * c.per });
     used.set(c.r.comp.id, (used.get(c.r.comp.id) || 0) + n * c.units);
     left -= n; capLeft -= n * c.up;

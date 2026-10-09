@@ -45,7 +45,11 @@ export async function fetchCostIndices() {
   return out;
 }
 
-/** Average daily traded volume over the last 7 recorded days, per type. */
+/**
+ * Average daily traded volume over the last 7 calendar days, per type. ESI history omits days with no trades, so
+ * the window is by date (not by the last 7 entries) and the total is divided by 7, otherwise a rarely traded item
+ * would look like it trades every day.
+ */
 export async function fetchVolumes(hub, typeIds, onProgress) {
   const region = regionOf(hub);
   const out = {};
@@ -57,8 +61,9 @@ export async function fetchVolumes(hub, typeIds, onProgress) {
       try {
         const r = await fetch(`https://esi.evetech.net/latest/markets/${region}/history/?type_id=${id}`);
         if (r.ok) {
-          const h = (await r.json()).slice(-7);
-          out[id] = h.length ? h.reduce((a, d) => a + d.volume, 0) / h.length : 0;
+          const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+          const h = (await r.json()).filter((d) => d.date >= cutoff);
+          out[id] = h.reduce((a, d) => a + d.volume, 0) / 7;
         }
       } catch {
         /* leave undefined */

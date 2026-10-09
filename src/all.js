@@ -7,7 +7,7 @@ import { fetchPrices, fetchVolumes } from "./api.js";
 const KEY = "evecp.all.v1";
 const DEFAULTS = {
   rigTier: "none", runs: 10, cat: "All", sub: "All", search: "", onlyProfit: true,
-  minOrders: 5, noCapital: true, needBpo: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
+  minOrders: 5, minWeekly: 0, noCapital: true, needBpo: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
 };
 const CAPITAL_SHIP_CONSTRUCTION = 22242;
 const JITA = "s:60003760"; // 4-4; BPOs are NPC-seeded, so Jita is the reference for "can I buy this BPO"
@@ -138,6 +138,7 @@ export async function initAll(root, bridge) {
     const list = rows.filter((r) =>
       (a.cat === "All" || r.it.cat === a.cat) && (a.sub === "All" || r.it.sub === a.sub) &&
       (!a.onlyProfit || (r.profit > 0 && r.hasPrices)) && r.orders >= a.minOrders &&
+      !(a.minWeekly > 0 && r.volDay != null && r.volDay * 7 < a.minWeekly) &&
       !(a.noCapital && r.it.skills.some((k) => k[0] === CAPITAL_SHIP_CONSTRUCTION)) &&
       !(a.needBpo && bpoSale && !(bpoSale[r.it.bp] > 0)) &&
       (!q || r.it.name.toLowerCase().includes(q)));
@@ -189,7 +190,7 @@ export async function initAll(root, bridge) {
       const room = c.capUnits - (used.get(c.r.it.id) || 0);
       let n = Math.min(left, room / c.units, c.up > 0 ? capLeft / c.up : Infinity);
       if (lazy) n = Math.floor(n + 1e-9);
-      if (!(n > 0)) continue;
+      if (!(n > 0) || n * c.units < c.r.it.perRun) continue; // less than one run of output: nothing to sell
       alloc.push({ ...c, n, profit: n * c.per });
       used.set(c.r.it.id, (used.get(c.r.it.id) || 0) + n * c.units);
       left -= n;
@@ -202,7 +203,7 @@ export async function initAll(root, bridge) {
     const lazy = s.lazy;
     const win = windowHours(s);
     const capital = s.capital > 0 ? Number(s.capital) : Infinity;
-    const known = list.filter((r) => r.volDay != null && r.hasPrices && r.profit > 0);
+    const known = list.filter((r) => r.volDay > 0 && r.hasPrices && r.profit > 0);
     for (const r of known) r.capUnits = r.volDay * (win / 24) * (s.volumeCap / 100);
     const cands = (lazy
       ? known.flatMap((r) => lazyCandidates(r, s))
@@ -294,6 +295,7 @@ export async function initAll(root, bridge) {
         <label>Group <select data-a="sub">${opt(subs, a.sub)}</select></label>
         <label>Rigs <select data-a="rigTier">${[["none", "none"], ["I", "best T1 rig"], ["II", "best T2 rig"]].map(([v, l]) => `<option value="${v}" ${a.rigTier === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label>Runs/job <input type="number" data-a="runs" min="1" value="${a.runs}"></label>
+        <label title="Applies once volumes are loaded">Min weekly volume <input type="number" data-a="minWeekly" min="0" value="${a.minWeekly}"></label>
         <label>Min orders <input type="number" data-a="minOrders" min="0" value="${a.minOrders}"></label>
         <label title="Hides capital ships, capital modules and capital components"><input type="checkbox" data-a="noCapital" ${a.noCapital ? "checked" : ""}> hide Capital Ship Construction items</label>
         <label title="Needs market data loaded; checks for BPO sell orders at Jita 4-4"><input type="checkbox" data-a="needBpo" ${a.needBpo ? "checked" : ""}> only BPOs sold in Jita</label>
