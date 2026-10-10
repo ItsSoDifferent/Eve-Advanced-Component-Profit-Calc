@@ -17,7 +17,7 @@ const CONFIGS = {
 // Reaction structures: only Tatara has a reaction-time bonus; neither has a material or cost bonus.
 const REACT_STRUCT = { athanor: { time: 1, size: "M-Set" }, tatara: { time: 0.75, size: "L-Set" } };
 const DEFAULTS = {
-  rigTier: "none", runs: 10, cat: "All", sub: "All", search: "", onlyProfit: true,
+  rigTier: "settings", runs: 10, cat: "All", sub: "All", search: "", onlyProfit: true,
   minOrders: 5, minWeekly: 0, noCapital: true, needBpo: true, sort: "maxProfit", asc: false, limit: 200, volN: 600,
 };
 const CAPITAL_SHIP_CONSTRUCTION = 22242;
@@ -63,6 +63,10 @@ export async function initAll(root, bridge, kind = "manufacturing") {
     }
     const size = RIG_SIZE[s.structure];
     if (!size || a.rigTier === "none") return [];
+    if (a.rigTier === "settings") {
+      const ok = new Set(data.rigSets[it.rigSet]);
+      return (s.rigs || []).filter((id) => id && ok.has(id) && data.rigs[id] && data.rigs[id][0].startsWith(`Standup ${size} `)).map(rigInfo);
+    }
     const tier = a.rigTier === "II" ? /\sII$/ : /\sI$/;
     const cand = data.rigSets[it.rigSet].map(rigInfo)
       .filter((r) => r.name.includes(`Standup ${size} `) && !r.name.includes("Thukker") && tier.test(r.name));
@@ -336,7 +340,7 @@ export async function initAll(root, bridge, kind = "manufacturing") {
       <div class="bar">
         <label>Category <select data-a="cat">${opt(cats, a.cat)}</select></label>
         <label>Group <select data-a="sub">${opt(subs, a.sub)}</select></label>
-        ${REACT ? "" : `<label>Rigs <select data-a="rigTier">${[["none", "none"], ["I", "best T1 rig"], ["II", "best T2 rig"]].map(([v, l]) => `<option value="${v}" ${a.rigTier === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>`}
+        ${REACT ? "" : `<label>Rigs <select data-a="rigTier">${[["settings", "rigs from settings"], ["none", "none"], ["I", "best T1 rig"], ["II", "best T2 rig"]].map(([v, l]) => `<option value="${v}" ${a.rigTier === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>`}
         <label>Runs/job <input type="number" data-a="runs" min="1" value="${a.runs}"></label>
         <label title="Applies once volumes are loaded">Min weekly volume <input type="number" data-a="minWeekly" min="0" value="${a.minWeekly}"></label>
         <label>Min orders <input type="number" data-a="minOrders" min="0" value="${a.minOrders}"></label>
@@ -349,7 +353,7 @@ export async function initAll(root, bridge, kind = "manufacturing") {
       <div class="tablewrap"><table id="a-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
       ${list.length > a.limit ? `<p><button id="a-more">Show ${Math.min(200, list.length - a.limit)} more</button></p>` : ""}
       <p class="muted notes">Min orders filters out products whose market has too few orders on the side you trade, where prices are unreliable.
-        ${REACT ? "Rigs: the reactor rigs selected in the Manufacturing location settings are applied to each reaction they are valid for." : "Rigs: picks the best applicable Standup rig(s) of that tier for your structure size (Raitaru M, Azbel L, Sotiyo XL); ignored at NPC stations."}
+        ${REACT ? "Rigs: the reactor rigs selected in the Manufacturing location settings are applied to each reaction they are valid for." : "Rigs: either the rigs chosen in the Manufacturing location settings (applied to each product they are valid for) or the best applicable Standup rig(s) of a tier for your structure size (Raitaru M, Azbel L, Sotiyo XL); ignored at NPC stations."}
         Volumes come from ESI history (7-day average) and take a while for large lists, so narrow the filters first; a product's
         capped profit uses the shared market-share cap and slot count and stays blank until its volume is loaded.</p>`;
     if (keepFocus) {

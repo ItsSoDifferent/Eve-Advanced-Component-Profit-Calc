@@ -68,6 +68,13 @@ for r in sorted(rig_ids):
     a = {k: v["value"] for k, v in types[str(r)]["dogma_attributes"].items()}
     rigs[r] = [en(r), a.get(MAT_ATTR, 0), a.get(TIME_ATTR, 0)]
 
+if not REACT:
+    # Every Standup engineering rig that applies to at least one product, for the sidebar rig selectors.
+    sel = [{"id": r, "name": v[0], "mat": v[1], "time": v[2]} for r, v in rigs.items() if v[0].startswith("Standup ")]
+    sel.sort(key=lambda x: x["name"])
+    with open(os.path.join(out, "mfg-rigs.json"), "w", encoding="utf-8") as f:
+        json.dump(sel, f, separators=(",", ":"))
+
 items.sort(key=lambda x: (x["cat"], x["sub"], x["name"]))
 skill_names = {str(s[0]): en(s[0]) for it in items for s in it["skills"]}
 doc = {"items": items, "mats": mats, "rigs": rigs, "rigSets": rig_sets, "skillNames": skill_names}

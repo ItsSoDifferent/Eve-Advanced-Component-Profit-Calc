@@ -12,7 +12,7 @@ No build step. Serve the folder (ES modules need http) and open it:
 ## What it does
 
 - Skills (Industry, Advanced Industry, Accounting, Broker Relations, standings) -> job time, sales tax, broker fee
-- Structure (NPC station / Raitaru / Azbel / Sotiyo), up to 3 engineering rigs scaled by system security
+- Structure (NPC station / Raitaru / Azbel / Sotiyo), up to 3 engineering rigs chosen from every Standup rig (grouped by M/L/XL size; a rig only applies to structures of its size and products it is valid for), scaled by system security
 - System cost index (live from ESI), facility tax, SCC surcharge, EIV from ESI adjusted prices
 - Per-blueprint ME/TE, runs per job
 - Separate buy and sell hubs, instant vs order for each side, per-item price overrides

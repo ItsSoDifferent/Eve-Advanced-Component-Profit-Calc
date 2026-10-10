@@ -23,7 +23,7 @@ const DEFAULTS = {
 };
 
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
-let data, rigs, reactRigList, systems, s;
+let data, rigs, allRigs, reactRigList, systems, s;
 let lastCtx;
 let planBuyText = "";
 let market = { adj: {}, indices: {}, reactionIndices: {}, prices: {}, volumes: {}, ts: 0 };
@@ -55,7 +55,13 @@ const sel = (path, label, opts, hint) => ({ path, label, hint, type: "select", o
 
 function sections() {
   const hubOpts = HUBS.map((h) => [h.id, h.label]);
-  const rigOpts = [["", "(none)"], ...rigs.map((r) => [r.id, r.name.replace("Standup ", "")])];
+  // Every Standup engineering rig, grouped by the structure size it fits. Only rigs valid for the products being
+  // evaluated take effect (e.g. component rigs on the Advanced components tab).
+  const rigGroups = [["M-Set", "M-set (Raitaru)"], ["L-Set", "L-set (Azbel)"], ["XL-Set", "XL-set (Sotiyo)"]].map(([size, label]) => ({
+    label,
+    items: allRigs.filter((r) => r.name.startsWith(`Standup ${size} `)).map((r) => [r.id, r.name.replace(`Standup ${size} `, "")]),
+  }));
+  const rigOpts = [["", "(none)"]];
   const reactRigOpts = [["", "(none)"], ...reactRigList.map((r) => [r.id, r.name.replace("Standup ", "")])];
   return [
     { title: "Skills", open: true, fields: [
@@ -71,7 +77,7 @@ function sections() {
       { path: "system", label: "System", type: "system", info: "sysinfo" },
       num("sciOverride", "Cost index override (%)", "Blank = live ESI value", 'step="0.01" placeholder="auto"'),
       sel("structure", "Structure", Object.entries(STRUCTURES).map(([k, v]) => [k, v.label])),
-      { type: "rigs", path: "rigs", label: "Rig", opts: rigOpts, hint: "Rig bonuses are scaled by system security (x1.0 high, x1.9 low, x2.1 null/WH). Ignored at NPC stations." },
+      { type: "rigs", path: "rigs", label: "Rig", opts: rigOpts, groups: rigGroups, hint: "Any engineering rig can be chosen. M-set rigs fit a Raitaru, L-set an Azbel, XL-set a Sotiyo; a rig only applies to products it is valid for (Advanced components uses the component rigs). Bonuses scale with system security (x1.0 high, x1.9 low, x2.1 null/WH) and are ignored at NPC stations." },
       num("facilityTax", "Facility tax (%)", "Charged on EIV by the structure owner", 'step="0.1" min="0"'),
       { type: "subhead", label: "Reactions (used by the Reactions tab)" },
       { path: "reactSystem", label: "Reaction system", type: "system", info: "rsysinfo" },
@@ -124,8 +130,11 @@ function fieldHtml(f) {
       <span class="hint" id="${f.info || "sysinfo"}"></span></label>`;
   }
   if (f.type === "rigs") {
+    const cur = (i) => String(getPath(s, f.path)[i]);
+    const optHtml = (i, [v, l]) => `<option value="${v}" ${cur(i) === String(v) ? "selected" : ""}>${esc(l)}</option>`;
     return [0, 1, 2].map((i) => `<label class="full">${esc(f.label)} ${i + 1}<select data-path="${f.path}.${i}" data-int>${
-      f.opts.map(([v, l]) => `<option value="${v}" ${String(getPath(s, f.path)[i]) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")
+      f.opts.map((o) => optHtml(i, o)).join("")
+    }${(f.groups || []).map((g) => `<optgroup label="${esc(g.label)}">${g.items.map((o) => optHtml(i, o)).join("")}</optgroup>`).join("")
     }</select></label>`).join("") + `<div class="hint">${esc(f.hint)}</div>`;
   }
   if (f.type === "feeinfo") return `<div class="full hint" id="feeinfo"></div>`;
@@ -559,7 +568,7 @@ function init() {
 (async () => {
   const j = (f) => fetch(`data/${f}`).then((r) => r.json());
   let reactions;
-  [data, rigs, systems, reactions] = await Promise.all([j("components.json"), j("rigs.json"), j("systems.json"), j("reactions.json")]);
+  [data, rigs, systems, reactions, allRigs] = await Promise.all([j("components.json"), j("rigs.json"), j("systems.json"), j("reactions.json"), j("mfg-rigs.json")]);
   reactRigList = Object.entries(reactions.rigs).map(([id, [name, mat, time]]) => ({ id: Number(id), name, mat, time }))
     .filter((r) => !r.name.includes("Thukker")).sort((x, y) => x.name.localeCompare(y.name));
   rigs = rigs.filter((r) => !r.name.includes("Outpost"));

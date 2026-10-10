@@ -1,10 +1,10 @@
 // Pure calculation logic. No DOM, no network.
 
 export const STRUCTURES = {
-  station: { label: "NPC station", me: 1, time: 1, cost: 1 },
-  raitaru: { label: "Raitaru", me: 0.99, time: 0.85, cost: 0.97 },
-  azbel: { label: "Azbel", me: 0.99, time: 0.8, cost: 0.96 },
-  sotiyo: { label: "Sotiyo", me: 0.99, time: 0.7, cost: 0.95 },
+  station: { label: "NPC station", me: 1, time: 1, cost: 1, size: "" },
+  raitaru: { label: "Raitaru", me: 0.99, time: 0.85, cost: 0.97, size: "M-Set" },
+  azbel: { label: "Azbel", me: 0.99, time: 0.8, cost: 0.96, size: "L-Set" },
+  sotiyo: { label: "Sotiyo", me: 0.99, time: 0.7, cost: 0.95, size: "XL-Set" },
 };
 
 export const secClass = (sec) => (sec >= 0.45 ? "high" : sec > 0 ? "low" : "null");
@@ -51,7 +51,8 @@ export function buildMods(s, rigs, sysSec) {
   if (s.structure !== "station") {
     for (const id of s.rigs) {
       const r = rigs.find((x) => x.id === id);
-      if (!r) continue;
+      // Unknown rigs (not valid for these products) and rigs of the wrong size for the structure do nothing.
+      if (!r || !r.name.startsWith(`Standup ${st.size} `)) continue;
       rigMat *= 1 + (r.mat / 100) * secMult;
       rigTime *= 1 + (r.time / 100) * secMult;
     }
