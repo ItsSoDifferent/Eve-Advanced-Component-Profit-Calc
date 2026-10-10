@@ -3,4 +3,4 @@
 // esi-skills.read_skills.v1 and a callback URL equal to the address you serve this page from (for example
 // http://localhost:8765/ and your GitHub Pages URL), then paste its client id here. If this is left empty the app lets
 // each visitor enter a client id in the Character panel instead.
-export const CLIENT_ID = "";
+export const CLIENT_ID = "262d7e542dbb4b5299d600f6aad6fc05";
