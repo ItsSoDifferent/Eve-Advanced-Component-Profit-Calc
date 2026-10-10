@@ -58,3 +58,16 @@ blocks you would buy; a mode selector can force "always react" or "never react".
 per component. The suggested plan respects both slot pools (manufacturing slots and reaction slots), capital, market share and
 raw-input supply, lists the reaction jobs to run, and copies a multibuy for the raw inputs. Component jobs follow lazy mode;
 reactor jobs are sized to the need, so reactor slots are fractional.
+
+## Character login (optional)
+
+Log in with EVE SSO to pull your character's skills and hide every product, formula and plan entry you cannot build
+(the "Only items my character can build" checkbox applies to all tabs). Your Industry, Advanced Industry, Reactions,
+Accounting and Broker Relations levels are copied into the Skills settings when skills sync.
+
+Setup (once, by whoever hosts the app): register an application at https://developers.eveonline.com/ with the scope
+`esi-skills.read_skills.v1` and one callback URL per place the app is served from, exactly as shown in the Character panel
+(for example `http://localhost:8765/` and your GitHub Pages URL), then paste its client ID into `src/config.js`. The flow
+is OAuth2 with PKCE, so there is no client secret and the client ID is public. If `src/config.js` is left empty, each
+visitor can paste a client ID into the Character panel instead. Tokens and the skill snapshot are kept in the browser's
+localStorage only; "Log out" removes them.

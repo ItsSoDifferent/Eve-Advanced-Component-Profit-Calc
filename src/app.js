@@ -3,12 +3,14 @@ import {
   fmtIsk, fmtShort, fmtTime,
 } from "./calc.js";
 import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from "./api.js";
+import * as esi from "./esi.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const SETTINGS_KEY = "evecp.settings.v1";
 const MARKET_KEY = "evecp.market.v3";
 
 const DEFAULTS = {
+  onlyMine: true,
   skills: { industry: 5, advancedIndustry: 5, reactions: 5, accounting: 5, brokerRelations: 5 },
   standings: { faction: 0, corp: 0 },
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
@@ -25,6 +27,8 @@ const DEFAULTS = {
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
 let data, rigs, allRigs, reactRigList, systems, s;
 let lastCtx;
+let char = esi.character(); // logged-in character { id, name, skills, ts } or null
+let charStatus = ""; // last login / sync message shown in the Character panel
 let planBuyText = "";
 let market = { adj: {}, indices: {}, reactionIndices: {}, prices: {}, volumes: {}, ts: 0 };
 
@@ -64,6 +68,7 @@ function sections() {
   const rigOpts = [["", "(none)"]];
   const reactRigOpts = [["", "(none)"], ...reactRigList.map((r) => [r.id, r.name.replace("Standup ", "")])];
   return [
+    { title: "Character", open: true, fields: [{ type: "character" }] },
     { title: "Skills", open: true, fields: [
       num("skills.industry", "Industry (-4% time/lvl)", "", 'min="0" max="5"'),
       num("skills.advancedIndustry", "Advanced Industry (-3% time/lvl)", "", 'min="0" max="5"'),
@@ -123,7 +128,96 @@ function sections() {
   ];
 }
 
+// ---------- EVE SSO login ----------
+const canBuild = (reqs) => !s.onlyMine || esi.meetsSkills(char, reqs);
+
+function characterHtml() {
+  const msg = charStatus ? `<div class="full hint">${esc(charStatus)}</div>` : "";
+  if (!esi.clientId()) {
+    return `<div class="full hint">Log in with EVE to limit every tab to items your character can actually build. This needs an
+      application registered at developers.eveonline.com with scope <code>esi-skills.read_skills.v1</code> and callback URL
+      <code>${esc(esi.redirectUri())}</code>. Paste its client ID:</div>
+      <input class="full" data-esi-client placeholder="client id" value="">
+      <button class="full" data-esi="save-client">Save client ID</button>${msg}`;
+  }
+  if (!char) {
+    return `<button class="full primary" data-esi="login">Log in with EVE Online</button>
+      <div class="full hint">Reads your skills only (scope esi-skills.read_skills.v1). Nothing is sent anywhere except EVE's login and ESI.
+      <a href="#" data-esi="change-client">change client ID</a></div>${msg}`;
+  }
+  const when = char.ts ? `skills synced ${new Date(char.ts).toLocaleString()}` : "skills not loaded yet";
+  return `<div class="full" style="display:flex;gap:8px;align-items:center"><img src="https://images.evetech.net/characters/${char.id}/portrait?size=64" width="40" height="40" alt="" style="border-radius:4px">
+      <div><b>${esc(char.name)}</b><div class="hint">${when}</div></div></div>
+    <label>Only items my character can build</label><input type="checkbox" data-path="onlyMine" ${s.onlyMine ? "checked" : ""}>
+    <span class="hint">Applies to every tab, including the plans. Industry, Advanced Industry, Reactions, Accounting and Broker Relations levels are copied into the Skills settings when skills sync.</span>
+    <button data-esi="refresh">Refresh skills</button><button data-esi="logout">Log out</button>${msg}`;
+}
+
+// Copy the character's levels into the calculator's own skill settings.
+function applySkills() {
+  if (!char?.skills) return;
+  for (const [key, id] of Object.entries(esi.SKILL_IDS)) s.skills[key] = char.skills[id] || 0;
+  save(SETTINGS_KEY, s);
+}
+
+async function syncCharacter() {
+  try {
+    char = await esi.syncSkills();
+    applySkills();
+    charStatus = "";
+  } catch (e) {
+    charStatus = e.message;
+    char = esi.character();
+  }
+  renderSettings();
+  renderResults();
+}
+
+async function onEsiClick(e) {
+  const b = e.target.closest("[data-esi]");
+  if (!b) return;
+  e.preventDefault();
+  const act = b.dataset.esi;
+  try {
+    if (act === "save-client") {
+      const v = $("[data-esi-client]").value.trim();
+      if (v) { esi.setClientId(v); renderSettings(); }
+    } else if (act === "change-client") {
+      esi.setClientId("");
+      renderSettings();
+    } else if (act === "login") {
+      await esi.login();
+    } else if (act === "refresh") {
+      charStatus = "Refreshing skills...";
+      renderSettings();
+      await syncCharacter();
+    } else if (act === "logout") {
+      esi.logout();
+      char = null;
+      charStatus = "";
+      renderSettings();
+      renderResults();
+    }
+  } catch (err) {
+    charStatus = err.message;
+    renderSettings();
+  }
+}
+
+// Finish a login redirect, and keep the skill snapshot reasonably fresh.
+async function startSession() {
+  try {
+    if (await esi.completeLogin()) { char = esi.character(); charStatus = "Logged in - loading skills..."; renderSettings(); await syncCharacter(); return; }
+  } catch (err) {
+    charStatus = err.message;
+    renderSettings();
+    return;
+  }
+  if (char && (!char.skills || Date.now() - char.ts > 3600e3)) await syncCharacter();
+}
+
 function fieldHtml(f) {
+  if (f.type === "character") return characterHtml();
   if (f.type === "subhead") return `<h3 class="full" style="margin-top:8px">${esc(f.label)}</h3>`;
   if (f.type === "system") {
     return `<label class="full">${esc(f.label)}<input list="systemlist" data-path="${f.path}" value="${esc(getPath(s, f.path))}">
@@ -220,7 +314,7 @@ function computeRows() {
   const sys = currentSystem();
   const mods = buildMods(s, rigs, sys ? sys[2] : 1);
   const ctx = lastCtx = { s, mods, sci: sciFor(sys), adj: market.adj, inPrice, outPrice };
-  return data.components.map((c) => {
+  return data.components.filter((c) => canBuild(c.skills)).map((c) => {
     const o = s.bp[c.blueprint] || {};
     const bp = { me: o.me ?? s.defaultME, te: o.te ?? s.defaultTE, custom: !!(o.me != null || o.te != null) };
     const r = evaluate(c, bp, ctx);
@@ -253,6 +347,8 @@ window.evecp = {
   get s() { return s; },
   get market() { return market; },
   get fmt() { return { fmtIsk, fmtShort, fmtTime }; },
+  get char() { return char; },
+  canBuild: (reqs) => canBuild(reqs),
   system: (kind = "manufacturing") => {
     if (kind === "reaction") {
       const sys = systems.find((x) => x[1].toLowerCase() === String(s.reactSystem).trim().toLowerCase());
@@ -521,6 +617,7 @@ function init() {
   if (cached && cached.hubs?.[0] === s.inHub && cached.hubs?.[1] === s.outHub) market = { ...market, ...cached };
   market.indices ||= {}; market.reactionIndices ||= {};
   $("#settings").addEventListener("change", onSettingChange);
+  $("#settings").addEventListener("click", onEsiClick);
   $("#toolbar").addEventListener("input", onSettingChange);
   $("#table").addEventListener("change", onSettingChange);
   $("#table").addEventListener("click", (e) => {
@@ -573,4 +670,5 @@ function init() {
     .filter((r) => !r.name.includes("Thukker")).sort((x, y) => x.name.localeCompare(y.name));
   rigs = rigs.filter((r) => !r.name.includes("Outpost"));
   init();
+  startSession();
 })();

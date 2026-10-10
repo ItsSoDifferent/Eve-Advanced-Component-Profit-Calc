@@ -170,6 +170,7 @@ export async function initAll(root, bridge, kind = "manufacturing") {
       (a.cat === "All" || r.it.cat === a.cat) && (a.sub === "All" || r.it.sub === a.sub) &&
       (!a.onlyProfit || (r.profit > 0 && r.hasPrices)) && r.orders >= a.minOrders &&
       !(a.minWeekly > 0 && r.volDay != null && r.volDay * 7 < a.minWeekly) &&
+      bridge.canBuild(r.it.skills) &&
       !(a.noCapital && r.it.skills.some((k) => k[0] === CAPITAL_SHIP_CONSTRUCTION)) &&
       !(a.needBpo && bpoSale && !(bpoSale[r.it.bp] > 0)) &&
       (!q || r.it.name.toLowerCase().includes(q)));

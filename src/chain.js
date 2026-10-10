@@ -22,7 +22,8 @@ export async function initChain(root, bridge) {
   root.innerHTML = "<p class='muted'>Loading data...</p>";
   const j = (f) => fetch(`data/${f}`).then((r) => r.json());
   const [comps, mfgRigs, react] = await Promise.all([j("components.json"), j("rigs.json"), j("reactions.json")]);
-  const components = comps.components;
+  const allComponents = comps.components;
+  let components = allComponents; // narrowed to what the character can build in compute()
   const open = new Set();
   let prices = { in: {}, out: {}, ts: 0 };
   let volumes = {};
@@ -104,7 +105,7 @@ export async function initChain(root, bridge) {
     };
     const make = (id) => {
       const F = formulas.get(id);
-      if (!F || busy.has(id)) return null;
+      if (!F || busy.has(id) || !bridge.canBuild(F.skills)) return null; // formula needs skills the character lacks
       busy.add(id);
       const runs = a.reactRuns;
       const mods = R.mods(F);
@@ -178,6 +179,7 @@ export async function initChain(root, bridge) {
 
   function compute() {
     const s = bridge.s;
+    components = allComponents.filter((c) => bridge.canBuild(c.skills));
     const mkU = { chain: sourcing(s, a.mode), buy: sourcing(s, "none") };
     const win = windowHours(s);
     return components.map((c) => {
@@ -429,7 +431,7 @@ export async function initChain(root, bridge) {
       await bridge.refreshShared();
       const s = bridge.s;
       const matIds = Object.keys(names).map(Number); // every input we might buy or reaction product we might price
-      const compIds = components.map((c) => c.id);
+      const compIds = allComponents.map((c) => c.id);
       const chunks = (ids) => Array.from({ length: Math.ceil(ids.length / 300) }, (_, i) => ids.slice(i * 300, i * 300 + 300));
       const get = async (hub, ids) => Object.assign({}, ...(await Promise.all(chunks(ids).map((c) => fetchPrices(hub, c)))));
       if (s.inHub === s.outHub) {
