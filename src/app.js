@@ -11,7 +11,9 @@ const MARKET_KEY = "evecp.market.v3";
 
 const DEFAULTS = {
   onlyMine: true,
-  skills: { industry: 5, advancedIndustry: 5, reactions: 5, accounting: 5, brokerRelations: 5 },
+  skills: { industry: 5, advancedIndustry: 5, reactions: 5, accounting: 5, brokerRelations: 5, reprocessing: 5, reprocessingEfficiency: 5, scrapmetal: 5 },
+  reprocLocation: "npc", reprocSystem: "Jita", reprocRigs: ["", "", ""], reprocImplant: 0, reprocOpLevel: 5,
+  reprocBaseYield: 50, reprocStanding: 0, reprocTax: 0,
   standings: { faction: 0, corp: 0 },
   baseSalesTax: 7.5, salesTaxOverride: "", brokerFeeOverride: "",
   system: "Jita", sciOverride: "",
@@ -25,7 +27,7 @@ const DEFAULTS = {
 };
 
 const view = { group: "All", onlyProfit: false, search: "", sort: "weeklyPerSlot", asc: false, open: new Set() };
-let data, rigs, allRigs, reactRigList, systems, s;
+let data, rigs, allRigs, reactRigList, reprocRigList, systems, s;
 let lastCtx;
 let char = esi.character(); // logged-in character { id, name, skills, ts } or null
 let charStatus = ""; // last login / sync message shown in the Character panel
@@ -61,6 +63,10 @@ function sections() {
   const hubOpts = HUBS.map((h) => [h.id, h.label]);
   // Every Standup engineering rig, grouped by the structure size it fits. Only rigs valid for the products being
   // evaluated take effect (e.g. component rigs on the Advanced components tab).
+  const reprocRigGroups = [["M-Set", "M-set (Athanor)"], ["L-Set", "L-set (Tatara)"], ["XL-Set", "XL-set"]].map(([size, label]) => ({
+    label,
+    items: reprocRigList.filter((r) => r.size === size).map((r) => [r.id, r.name.replace(`Standup ${size} `, "")]),
+  }));
   const rigGroups = [["M-Set", "M-set (Raitaru)"], ["L-Set", "L-set (Azbel)"], ["XL-Set", "XL-set (Sotiyo)"]].map(([size, label]) => ({
     label,
     items: allRigs.filter((r) => r.name.startsWith(`Standup ${size} `)).map((r) => [r.id, r.name.replace(`Standup ${size} `, "")]),
@@ -111,6 +117,19 @@ function sections() {
       sel("inputMethod", "Input method", [["instant", "Buy from sell orders (instant)"], ["order", "Place buy orders"]]),
       sel("outputMethod", "Output method", [["order", "Place sell orders"], ["instant", "Sell to buy orders (instant)"]]),
       sel("priceStat", "Price statistic", [["percentile", "Percentile (outlier-resistant)"], ["best", "Best price"], ["median", "Median"], ["weightedAverage", "Weighted average"]]),
+    ] },
+    { title: "Reprocessing", fields: [
+      num("skills.reprocessing", "Reprocessing (+3% yield/lvl)", "", 'min="0" max="5"'),
+      num("skills.reprocessingEfficiency", "Reprocessing Efficiency (+2%/lvl)", "", 'min="0" max="5"'),
+      num("skills.scrapmetal", "Scrapmetal Processing (+2%/lvl)", "Modules, ships, ammo and other non-ore items", 'min="0" max="5"'),
+      num("reprocOpLevel", "Ore / ice / moon ore skill level", "Used for every ore type unless you are logged in, where your actual per-ore skill levels are used", 'min="0" max="5"'),
+      num("reprocImplant", "Implant bonus (%)", "RX-801 / 802 / 804 give 1 / 2 / 4", 'min="0" max="4" step="1"'),
+      sel("reprocLocation", "Reprocessing location", [["npc", "NPC station"], ["athanor", "Athanor (M, +2%)"], ["tatara", "Tatara (L, +5.5%)"], ["citadelM", "Other Upwell (M)"], ["citadelL", "Other Upwell (L)"], ["citadelXL", "Other Upwell (XL)"]]),
+      num("reprocBaseYield", "NPC station base yield (%)", "30-50% depending on the station's equipment", 'min="0" max="100" step="0.1"'),
+      num("reprocStanding", "Standing with NPC owner", "NPC tax = 5% - 0.75% x standing, minimum 0", 'min="0" max="10" step="0.1"'),
+      num("reprocTax", "Structure reprocessing tax (%)", "Set by the structure owner", 'min="0" step="0.1"'),
+      { path: "reprocSystem", label: "Structure system (rig security bonus)", type: "system", info: "psysinfo" },
+      { type: "rigs", path: "reprocRigs", label: "Reprocessing rig", opts: [["", "(none)"]], groups: reprocRigGroups, hint: "M-set grading processors fit an Athanor / M Upwell, L-set and XL-set monitors a Tatara / L or XL Upwell. A rig only helps its own ore type (monitors help all ores) and adds +1 (T1) / +3 (T2) to the 50% base yield, scaled by +6% low-sec / +12% null-sec. Ignored at NPC stations and for scrap items." },
     ] },
     { title: "Taxes & fees", fields: [
       num("baseSalesTax", "Base sales tax (%)", "Reduced 11% per Accounting level", 'step="0.1"'),
@@ -261,6 +280,9 @@ function renderSideInfo() {
       el.textContent = `${secClass(sys[2])}sec ${sys[2].toFixed(1)} - manufacturing cost index ${(idx * 100).toFixed(2)}%`;
     }
   }
+  const psys = systems.find((x) => x[1].toLowerCase() === String(s.reprocSystem).trim().toLowerCase());
+  const pel = $("#psysinfo");
+  if (pel) pel.textContent = psys ? `${secClass(psys[2])}sec ${psys[2].toFixed(1)}` : "Unknown system";
   const rsys = systems.find((x) => x[1].toLowerCase() === String(s.reactSystem).trim().toLowerCase());
   const rel = $("#rsysinfo");
   if (rel) {
@@ -350,6 +372,10 @@ window.evecp = {
   get char() { return char; },
   canBuild: (reqs) => canBuild(reqs),
   system: (kind = "manufacturing") => {
+    if (kind === "reprocess") {
+      const sys = systems.find((x) => x[1].toLowerCase() === String(s.reprocSystem).trim().toLowerCase());
+      return { sec: sys ? sys[2] : 1, sci: 0 };
+    }
     if (kind === "reaction") {
       const sys = systems.find((x) => x[1].toLowerCase() === String(s.reactSystem).trim().toLowerCase());
       const sci = s.reactSciOverride !== "" && s.reactSciOverride != null ? s.reactSciOverride / 100 : market.reactionIndices[sys?.[0]] ?? 0;
@@ -665,6 +691,7 @@ function init() {
 (async () => {
   const j = (f) => fetch(`data/${f}`).then((r) => r.json());
   let reactions;
+  reprocRigList = await j("reprocess-rigs.json");
   [data, rigs, systems, reactions, allRigs] = await Promise.all([j("components.json"), j("rigs.json"), j("systems.json"), j("reactions.json"), j("mfg-rigs.json")]);
   reactRigList = Object.entries(reactions.rigs).map(([id, [name, mat, time]]) => ({ id: Number(id), name, mat, time }))
     .filter((r) => !r.name.includes("Thukker")).sort((x, y) => x.name.localeCompare(y.name));

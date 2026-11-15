@@ -12,7 +12,8 @@ const K_CHAR = "evecp.esi.char";
 const K_PENDING = "evecp.esi.pending"; // PKCE verifier + state, kept in sessionStorage across the redirect
 
 // Skill ids the calculator uses to pre-fill its skill settings.
-export const SKILL_IDS = { industry: 3380, advancedIndustry: 3388, reactions: 45746, accounting: 16622, brokerRelations: 3446 };
+export const SKILL_IDS = { industry: 3380, advancedIndustry: 3388, reactions: 45746, accounting: 16622, brokerRelations: 3446,
+  reprocessing: 3385, reprocessingEfficiency: 3389, scrapmetal: 12196 };
 
 const read = (store, key) => { try { return JSON.parse(store.getItem(key)); } catch { return null; } };
 const write = (store, key, v) => { try { store.setItem(key, JSON.stringify(v)); } catch { /* ignore */ } };

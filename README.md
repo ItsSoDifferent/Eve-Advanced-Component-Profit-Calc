@@ -71,3 +71,19 @@ Setup (once, by whoever hosts the app): register an application at https://devel
 is OAuth2 with PKCE, so there is no client secret and the client ID is public. If `src/config.js` is left empty, each
 visitor can paste a client ID into the Character panel instead. Tokens and the skill snapshot are kept in the browser's
 localStorage only; "Log out" removes them.
+
+## Reprocessing tab
+
+Scans every reprocessable market item (`data/reprocess.json`, built by `scripts/build_reprocess_data.py`) for ones worth more
+as reprocessed materials than they cost to buy at your buy hub, selling the outputs at your sell hub. "Load market data"
+prices all ~7,800 items and ~570 outputs in a few requests. Sidebar settings (Reprocessing section): Reprocessing,
+Reprocessing Efficiency and Scrapmetal Processing levels, ore/ice/moon-ore skill level (your real per-ore levels are used
+when logged in), implant, location (NPC station, Athanor, Tatara or another Upwell structure), NPC base yield and standing,
+structure tax, structure system and up to three reprocessing rigs.
+
+Yields: ore, ice and moon ore are `base x (1 + 3% x Reprocessing) x (1 + 2% x Efficiency) x (1 + 2% x ore skill) x (1 + implant)`
+with an Upwell base of `(50 + rig) x (1 + security bonus) x (1 + structure bonus)` (rig +1 T1 / +3 T2; security +6% low-sec,
++12% null-sec, only with a rig; structure +2% Athanor, +5.5% Tatara). Everything else uses `base x (1 + 2% x Scrapmetal
+Processing)`. Reprocessing tax applies to the adjusted-price value of the outputs. The table ranks by potential profit
+(profit per unit x the share of listed supply set by "Max share of input supply"), and filters out items whose outputs
+have too few orders to trust their price.

@@ -10,6 +10,7 @@ tabs.forEach((b) => b.addEventListener("click", async () => {
     loaded.add(kind);
     const root = document.getElementById(b.dataset.tab);
     if (kind === "chain") (await import("./chain.js")).initChain(root, window.evecp);
+    else if (kind === "reprocess") (await import("./reprocess.js")).initReprocess(root, window.evecp);
     else (await import("./all.js")).initAll(root, window.evecp, kind);
   }
   document.dispatchEvent(new Event("evecp:change"));
