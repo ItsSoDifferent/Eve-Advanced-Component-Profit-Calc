@@ -139,9 +139,9 @@ function sections() {
     ] },
     { title: "Shipping", fields: [
       num("shipIn.perM3", "Inputs: ISK per m3", "", 'min="0"'),
-      num("shipIn.collateral", "Inputs: collateral (% of value)", "", 'min="0" step="0.1"'),
+      num("shipIn.collateral", "Inputs: + % of value", "Added on top of the per-m3 rate, e.g. 250 ISK/m3 + 1% of value. Applied to the item value (market price incl. broker fee)", 'min="0" step="0.1"'),
       num("shipOut.perM3", "Outputs: ISK per m3", "", 'min="0"'),
-      num("shipOut.collateral", "Outputs: collateral (% of value)", "", 'min="0" step="0.1"'),
+      num("shipOut.collateral", "Outputs: + % of value", "Added on top of the per-m3 rate, charged on the sale value of the goods", 'min="0" step="0.1"'),
     ] },
     { title: "Materials (price overrides)", fields: [{ type: "materials" }] },
   ];
@@ -168,7 +168,7 @@ function characterHtml() {
   return `<div class="full" style="display:flex;gap:8px;align-items:center"><img src="https://images.evetech.net/characters/${char.id}/portrait?size=64" width="40" height="40" alt="" style="border-radius:4px">
       <div><b>${esc(char.name)}</b><div class="hint">${when}</div></div></div>
     <label>Only items my character can build</label><input type="checkbox" data-path="onlyMine" ${s.onlyMine ? "checked" : ""}>
-    <span class="hint">Applies to every tab, including the plans. Industry, Advanced Industry, Reactions, Accounting and Broker Relations levels are copied into the Skills settings when skills sync.</span>
+    <span class="hint">Applies to every tab, including the plans. Industry, Advanced Industry, Reactions, Accounting and Broker Relations levels are copied into the Skills settings when you log in or press Refresh skills; you can edit them afterwards.</span>
     <button data-esi="refresh">Refresh skills</button><button data-esi="logout">Log out</button>${msg}`;
 }
 
@@ -179,10 +179,12 @@ function applySkills() {
   save(SETTINGS_KEY, s);
 }
 
-async function syncCharacter() {
+// Only login and the "Refresh skills" button copy levels into the settings; the automatic hourly refresh at page load
+// just updates the character snapshot so that skills you typed in are never silently overwritten.
+async function syncCharacter(apply = true) {
   try {
     char = await esi.syncSkills();
-    applySkills();
+    if (apply) applySkills();
     charStatus = "";
   } catch (e) {
     charStatus = e.message;
@@ -232,7 +234,7 @@ async function startSession() {
     renderSettings();
     return;
   }
-  if (char && (!char.skills || Date.now() - char.ts > 3600e3)) await syncCharacter();
+  if (char && (!char.skills || Date.now() - char.ts > 3600e3)) await syncCharacter(!char.skills);
 }
 
 function fieldHtml(f) {

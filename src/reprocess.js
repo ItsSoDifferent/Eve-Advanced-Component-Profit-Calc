@@ -180,7 +180,7 @@ export async function initReprocess(root, bridge) {
     root.innerHTML = `
       <div class="intro"><b>Reprocessing.</b> Items worth more as reprocessed materials than they cost to buy (${items.length} reprocessable items).
         Buy at your buy hub, sell the outputs at your sell hub, using the Reprocessing settings (skills, location, rigs, tax) and the shared
-        market, fee and shipping settings. Ore, ice and moon-ore yield uses your actual per-ore skills when you are logged in.
+        market, fee and shipping settings. Ore, ice and moon-ore yield uses the ore skill level from the settings.
         <span class="muted">Current yield for ${esc(sample.it.name)}: ${(sample.y * 100).toFixed(1)}% (${loc.size ? "Upwell structure" : "NPC station"}).
         ${prices.ts ? "Prices loaded " + new Date(prices.ts).toLocaleTimeString() : "No prices loaded yet."}</span></div>
       ${top.length ? `<div class="planbox"><h3>Best opportunities (profit if you buy ${s.inputCap}% of the listed supply)</h3><table><tr><th>Item</th><th>Profit / unit</th><th>ROI</th><th>Units</th><th>Capital</th><th>Potential profit</th></tr>${top.map((r) => `<tr><td>${esc(r.it.name)}</td><td>${fmtIsk(r.profit, 2)}</td><td>${(r.roi * 100).toFixed(1)}%</td><td>${fmtIsk(r.units)}</td><td>${fmtShort(r.capital)}</td><td class="good">${fmtShort(r.potential)}</td></tr>`).join("")}</table></div>` : ""}
