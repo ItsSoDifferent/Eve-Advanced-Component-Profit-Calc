@@ -122,7 +122,7 @@ function sections() {
       num("skills.reprocessing", "Reprocessing (+3% yield/lvl)", "", 'min="0" max="5"'),
       num("skills.reprocessingEfficiency", "Reprocessing Efficiency (+2%/lvl)", "", 'min="0" max="5"'),
       num("skills.scrapmetal", "Scrapmetal Processing (+2%/lvl)", "Modules, ships, ammo and other non-ore items", 'min="0" max="5"'),
-      num("reprocOpLevel", "Ore / ice / moon ore skill level", "Used for every ore type unless you are logged in, where your actual per-ore skill levels are used", 'min="0" max="5"'),
+      num("reprocOpLevel", "Ore / ice / moon ore skill level", "Applied to every ore, ice and moon ore type; not overridden by your logged-in character", 'min="0" max="5"'),
       num("reprocImplant", "Implant bonus (%)", "RX-801 / 802 / 804 give 1 / 2 / 4", 'min="0" max="4" step="1"'),
       sel("reprocLocation", "Reprocessing location", [["npc", "NPC station"], ["athanor", "Athanor (M, +2%)"], ["tatara", "Tatara (L, +5.5%)"], ["citadelM", "Other Upwell (M)"], ["citadelL", "Other Upwell (L)"], ["citadelXL", "Other Upwell (XL)"]]),
       num("reprocBaseYield", "NPC station base yield (%)", "30-50% depending on the station's equipment", 'min="0" max="100" step="0.1"'),

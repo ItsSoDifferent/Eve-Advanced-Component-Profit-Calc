@@ -43,8 +43,7 @@ export async function initReprocess(root, bridge) {
     if (it.kind === "scrap") {
       return (loc.size ? 0.5 : s.reprocBaseYield / 100) * (1 + 0.02 * (s.skills.scrapmetal || 0));
     }
-    const cs = bridge.char?.skills;
-    const op = cs ? cs[it.skill] || 0 : s.reprocOpLevel;
+    const op = s.reprocOpLevel;
     const skills = (1 + 0.03 * s.skills.reprocessing) * (1 + 0.02 * s.skills.reprocessingEfficiency) * (1 + 0.02 * op) * (1 + s.reprocImplant / 100);
     if (!loc.size) return (s.reprocBaseYield / 100) * skills;
     const rm = Math.max(0, ...(s.reprocRigs || []).map((id) => {
