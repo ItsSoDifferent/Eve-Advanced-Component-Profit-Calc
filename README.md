@@ -66,7 +66,7 @@ Log in with EVE SSO to pull your character's skills and hide every product, form
 Accounting and Broker Relations levels are copied into the Skills settings when skills sync.
 
 Setup (once, by whoever hosts the app): register an application at https://developers.eveonline.com/ with the scope
-`esi-skills.read_skills.v1` and `esi-universe.read_structures.v1` (the latter is only used by the Tatara finder tab) and one callback URL per place the app is served from, exactly as shown in the Character panel
+`esi-skills.read_skills.v1` (and optionally `esi-universe.read_structures.v1`, which only the Tatara finder tab asks for) and one callback URL per place the app is served from, exactly as shown in the Character panel
 (for example `http://localhost:8765/` and your GitHub Pages URL), then paste its client ID into `src/config.js`. The flow
 is OAuth2 with PKCE, so there is no client secret and the client ID is public. If `src/config.js` is left empty, each
 visitor can paste a client ID into the Character panel instead. Tokens and the skill snapshot are kept in the browser's
@@ -91,6 +91,6 @@ have too few orders to trust their price.
 ## Tatara finder tab
 Lists public Tataras in low/null-sec systems that border high-sec, with each system's reaction cost index and the jump distance
 to the nearest (or chosen) trade hub. Structure details are not public, so it needs the `esi-universe.read_structures.v1` scope:
-enable it on your EVE application and log in again. The first scan checks every public structure (a few minutes); results are
+enable it on your EVE application, then use the tab's "Log in with structure access" button (the normal login stays skills-only, so it keeps working if the scope is not enabled). The first scan checks every public structure (a few minutes); results are
 cached in the browser so later scans only look at new ones. Rigs cannot be read from ESI. System/jump data is in
 `data/tatara-systems.json` (generated from the SDE).

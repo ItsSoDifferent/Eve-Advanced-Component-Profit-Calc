@@ -5,7 +5,8 @@ import { CLIENT_ID } from "./config.js";
 
 const AUTH_URL = "https://login.eveonline.com/v2/oauth/authorize";
 const TOKEN_URL = "https://login.eveonline.com/v2/oauth/token";
-const SCOPE = "esi-skills.read_skills.v1 esi-universe.read_structures.v1"; // skills, plus structure lookup for the Tatara finder
+const SCOPE = "esi-skills.read_skills.v1";
+export const STRUCTURE_SCOPE = "esi-universe.read_structures.v1"; // only requested from the Tatara finder tab
 const K_CLIENT = "evecp.esi.client"; // client id entered in the UI when config.js has none
 const K_TOKENS = "evecp.esi.tokens";
 const K_CHAR = "evecp.esi.char";
@@ -36,13 +37,13 @@ export function decodeJwt(token) {
 export const pkceChallenge = async (verifier) => b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
 
 /** Start the login: build the authorize URL and send the browser to EVE's login page. */
-export async function login() {
+export async function login(extraScopes = "") {
   const verifier = randomString(48);
   const state = randomString(16);
   const challenge = await pkceChallenge(verifier);
   write(sessionStorage, K_PENDING, { verifier, state });
   const q = new URLSearchParams({
-    response_type: "code", redirect_uri: redirectUri(), client_id: clientId(), scope: SCOPE,
+    response_type: "code", redirect_uri: redirectUri(), client_id: clientId(), scope: `${SCOPE} ${extraScopes}`.trim(),
     code_challenge: challenge, code_challenge_method: "S256", state,
   });
   location.assign(`${AUTH_URL}?${q}`);

@@ -26,14 +26,13 @@ export async function initTatara(root, bridge) {
 
   root.innerHTML = `
     <div class="intro">Public Tataras in low/null-sec systems next to high-sec, filtered by reaction cost index. Structure details are
-      not public, so this needs the <code>${SCOPE}</code> scope: log in from the Character panel (if you logged in before this tab
-      existed, log out and in again). Your application at developers.eveonline.com must have that scope enabled.</div>
+      not public, so this needs the <code>${SCOPE}</code> scope: press "Log in with structure access" (the normal login does not ask for it). Your application at developers.eveonline.com must have that scope enabled, otherwise EVE answers "invalid_scope".</div>
     <div class="bar">
       <span id="t-who" class="muted"></span>
       <label>Max reaction index % <input type="number" id="t-max" step="0.1" min="0" value="${a.maxIdx}"></label>
       <label>Trade hub <select id="t-hub"><option value="-1">Nearest</option>${HUBS.map((h, i) => `<option value="${i}">${h}</option>`).join("")}</select></label>
       <label>Sort <select id="t-sort"><option value="idx">Reaction index</option><option value="hub">Hub jumps</option><option value="name">System</option></select></label>
-      <button class="primary" id="t-scan">Scan</button><button id="t-copy">Copy list</button><button id="t-clear">Clear cache</button>
+      <button id="t-grant" hidden>Log in with structure access</button><button class="primary" id="t-scan">Scan</button><button id="t-copy">Copy list</button><button id="t-clear">Clear cache</button>
     </div>
     <div class="tprog"><i id="t-prog"></i></div>
     <p class="muted" id="t-status"></p>
@@ -54,7 +53,9 @@ export async function initTatara(root, bridge) {
 
   function showWho() {
     const c = esi.character();
-    $("t-who").textContent = !esi.loggedIn() ? "Not logged in" : esi.hasScope(SCOPE) ? `Logged in as ${c.name}` : `Logged in as ${c.name}, but without structure access: log out and in again`;
+    const ok = esi.loggedIn() && esi.hasScope(SCOPE);
+    $("t-who").textContent = !esi.loggedIn() ? "Not logged in" : ok ? `Logged in as ${c.name}` : `Logged in as ${c.name}, but without structure access`;
+    $("t-grant").hidden = ok;
   }
 
   // ---------- ESI ----------
@@ -91,8 +92,7 @@ export async function initTatara(root, bridge) {
 
   async function scan() {
     if (busy) return;
-    if (!esi.loggedIn()) { status("Log in first (Character panel): structure details need your token", true); return; }
-    if (!esi.hasScope(SCOPE)) { status("Your login lacks structure access. Log out and log in again (and make sure the scope is enabled on your EVE application).", true); return; }
+    if (!esi.loggedIn() || !esi.hasScope(SCOPE)) { status("Structure details need a login with structure access: press \"Log in with structure access\".", true); return; }
     busy = true; $("t-scan").disabled = true; prog(-1);
     try {
       status("Step 1/3: loading reaction cost indices...");
@@ -167,6 +167,7 @@ export async function initTatara(root, bridge) {
   $("t-max").addEventListener("change", (e) => { a.maxIdx = e.target.value; save(); render(); });
   $("t-hub").addEventListener("change", (e) => { a.hub = e.target.value; save(); render(); });
   $("t-sort").addEventListener("change", (e) => { a.sort = e.target.value; save(); render(); });
+  $("t-grant").addEventListener("click", () => esi.login(SCOPE).catch((e) => status(e.message, true)));
   $("t-scan").addEventListener("click", scan);
   $("t-clear").addEventListener("click", () => { lsDel(K_STRUCT); lsDel(K_RESULTS); $("t-out").innerHTML = ""; prog(0); status("Cache cleared"); });
   $("t-copy").addEventListener("click", () => {
