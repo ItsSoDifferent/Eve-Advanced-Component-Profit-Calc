@@ -44,7 +44,12 @@ export async function initTatara(root, bridge) {
   const $ = (id) => root.querySelector("#" + id);
   $("t-hub").value = a.hub; $("t-sort").value = a.sort;
   const status = (t, err) => { $("t-status").innerHTML = err ? `<span style="color:var(--bad,#ff6b6b)">${esc(t)}</span>` : esc(t); };
-  const prog = (f) => { $("t-prog").style.width = Math.max(0, Math.min(1, f)) * 100 + "%"; };
+  // f in 0..1 shows a determinate bar; a negative value shows the "working, length unknown" animation.
+  const prog = (f) => {
+    const bar = $("t-prog");
+    bar.parentElement.classList.toggle("indet", f < 0);
+    bar.style.width = f < 0 ? "" : Math.max(0, Math.min(1, f)) * 100 + "%";
+  };
   const save = () => lsSet(KEY, a);
 
   function showWho() {
@@ -88,18 +93,20 @@ export async function initTatara(root, bridge) {
     if (busy) return;
     if (!esi.loggedIn()) { status("Log in first (Character panel): structure details need your token", true); return; }
     if (!esi.hasScope(SCOPE)) { status("Your login lacks structure access. Log out and log in again (and make sure the scope is enabled on your EVE application).", true); return; }
-    busy = true; $("t-scan").disabled = true; prog(0);
+    busy = true; $("t-scan").disabled = true; prog(-1);
     try {
-      status("Loading reaction cost indices...");
+      status("Step 1/3: loading reaction cost indices...");
       const idx = await loadIndices();
-      status("Loading public structure list...");
+      status("Step 2/3: loading the public structure list...");
       const lr = await get("/universe/structures" + slash());
       if (!lr.ok) throw new Error(`Structure list failed (${lr.status})`);
       const ids = await lr.json();
       const cache = lsGet(K_STRUCT, {});
       const todo = ids.filter((id) => !(id in cache));
       let done = 0, stop = false, auth = await esi.accessToken();
-      status(`${ids.length} public structures, ${todo.length} not cached yet...`);
+      const total = todo.length;
+      status(`Step 3/3: ${ids.length} public structures, ${total} not cached yet...`);
+      prog(total ? 0 : 1);
       const worker = async () => {
         while (todo.length && !stop) {
           const id = todo.pop();
@@ -109,12 +116,13 @@ export async function initTatara(root, bridge) {
           else if (r && (r.status === 403 || r.status === 404)) cache[id] = 0;
           else if (r && r.status === 401) { stop = true; status("Token rejected, log in again", true); }
           done++;
-          if (done % 25 === 0) { prog(done / Math.max(1, done + todo.length)); status(`Checking structures... ${done} done, ${todo.length} left`); lsSet(K_STRUCT, cache); }
+          if (done % 25 === 0) { prog(done / total); status(`Step 3/3: checking structures... ${done} of ${total} (${Math.round((done / total) * 100)}%)`); lsSet(K_STRUCT, cache); }
         }
       };
       await Promise.all(Array.from({ length: 8 }, worker));
       lsSet(K_STRUCT, cache);
       if (stop) return;
+      prog(-1); status("Looking up structure owners...");
       const hits = [];
       for (const id of ids) { const c = cache[id]; if (Array.isArray(c) && sysById.has(c[0])) hits.push({ id, sys: c[0], name: c[1], owner: c[2], idx: idx[c[0]] }); }
       const owners = [...new Set(hits.map((h) => h.owner))], names = {};

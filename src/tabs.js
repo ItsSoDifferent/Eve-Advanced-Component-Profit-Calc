@@ -9,10 +9,15 @@ tabs.forEach((b) => b.addEventListener("click", async () => {
   if (kind && !loaded.has(kind)) {
     loaded.add(kind);
     const root = document.getElementById(b.dataset.tab);
-    if (kind === "chain") (await import("./chain.js")).initChain(root, window.evecp);
-    else if (kind === "reprocess") (await import("./reprocess.js")).initReprocess(root, window.evecp);
-    else if (kind === "tatara") (await import("./tatara.js")).initTatara(root, window.evecp);
-    else (await import("./all.js")).initAll(root, window.evecp, kind);
+    try {
+      if (kind === "chain") await (await import("./chain.js")).initChain(root, window.evecp);
+      else if (kind === "reprocess") await (await import("./reprocess.js")).initReprocess(root, window.evecp);
+      else if (kind === "tatara") await (await import("./tatara.js")).initTatara(root, window.evecp);
+      else await (await import("./all.js")).initAll(root, window.evecp, kind);
+    } catch (err) {
+      loaded.delete(kind);
+      root.innerHTML = `<p style="color:var(--bad)">Could not load this tab: ${String(err.message || err).replace(/[<&]/g, "")}. Try a hard refresh (Ctrl+Shift+R).</p>`;
+    }
   }
   document.dispatchEvent(new Event("evecp:change"));
 }));
