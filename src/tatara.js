@@ -1,7 +1,7 @@
 // Tatara finder tab: lists public Tataras in low/null-sec systems next to high-sec, filtered by reaction cost index.
 // Needs the ESI scope esi-universe.read_structures.v1 (structure names/types are not public). Self-contained:
 // data/tatara-systems.json is [systemId, name, sec, region, adjacent highsec name, its sec, [jumps to Jita, Amarr, Dodixie, Rens, Hek]].
-import * as esi from "./esi.js";
+import * as esi from "./esi.js?v=20261123b";
 
 const KEY = "evecp.tatara.v1";
 const K_STRUCT = "evecp.tatara.structs"; // { structureId: [systemId, name, ownerId] | 1 (other type) | 0 (no access) }
