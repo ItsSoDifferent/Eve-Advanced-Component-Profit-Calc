@@ -64,3 +64,9 @@ td input.price { width: 92px; }
 .alltab .bar select, .alltab .bar input[type=search], .alltab .bar input[type=number] { width: auto; }
 .alltab .bar input[type=number] { width: 70px; }
 .alltab .intro { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+
+/* Tatara finder */
+.tprog { height: 6px; background: var(--panel); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+.tprog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.tcard { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
+.tmeta { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-top: 4px; color: var(--muted); }

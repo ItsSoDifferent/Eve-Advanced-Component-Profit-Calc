@@ -5,7 +5,7 @@ import { CLIENT_ID } from "./config.js";
 
 const AUTH_URL = "https://login.eveonline.com/v2/oauth/authorize";
 const TOKEN_URL = "https://login.eveonline.com/v2/oauth/token";
-const SCOPE = "esi-skills.read_skills.v1";
+const SCOPE = "esi-skills.read_skills.v1 esi-universe.read_structures.v1"; // skills, plus structure lookup for the Tatara finder
 const K_CLIENT = "evecp.esi.client"; // client id entered in the UI when config.js has none
 const K_TOKENS = "evecp.esi.tokens";
 const K_CHAR = "evecp.esi.char";
@@ -78,7 +78,7 @@ export async function completeLogin() {
   return true;
 }
 
-async function accessToken() {
+export async function accessToken() {
   let t = read(localStorage, K_TOKENS);
   if (!t) throw new Error("Not logged in");
   if (Date.now() >= t.exp) t = await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh });
@@ -116,4 +116,14 @@ export function meetsSkills(char, reqs) {
     const [id, lvl] = Array.isArray(r) ? r : [r.id, r.level];
     return (char.skills[id] || 0) >= lvl;
   });
+}
+
+/** True when the stored login was granted this scope (logins made before a scope was added need to be repeated). */
+export function hasScope(scope) {
+  const t = read(localStorage, K_TOKENS);
+  if (!t) return false;
+  try {
+    const scp = decodeJwt(t.access).scp;
+    return (Array.isArray(scp) ? scp : [scp]).includes(scope);
+  } catch { return false; }
 }
