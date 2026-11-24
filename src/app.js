@@ -3,7 +3,7 @@ import {
   fmtIsk, fmtShort, fmtTime,
 } from "./calc.js";
 import { HUBS, fetchPrices, fetchAdjusted, fetchCostIndices, fetchVolumes } from "./api.js";
-import * as esi from "./esi.js?v=20261123b";
+import * as esi from "./esi.js?v=20261123c";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const SETTINGS_KEY = "evecp.settings.v1";

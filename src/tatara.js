@@ -1,12 +1,15 @@
 // Tatara finder tab: lists public Tataras in low/null-sec systems next to high-sec, filtered by reaction cost index.
 // Needs the ESI scope esi-universe.read_structures.v1 (structure names/types are not public). Self-contained:
 // data/tatara-systems.json is [systemId, name, sec, region, adjacent highsec name, its sec, [jumps to Jita, Amarr, Dodixie, Rens, Hek]].
-import * as esi from "./esi.js?v=20261123b";
+import * as esi from "./esi.js?v=20261123c";
 
 const KEY = "evecp.tatara.v1";
 const K_STRUCT = "evecp.tatara.structs"; // { structureId: [systemId, name, ownerId] | 1 (other type) | 0 (no access) }
 const K_RESULTS = "evecp.tatara.results";
-const TATARA = 35836, SCOPE = "esi-universe.read_structures.v1";
+const TATARA = 35836;
+// structure details + searching for structures the logged-in character can access (public ones are not the whole picture)
+const SCOPE = "esi-universe.read_structures.v1", SEARCH_SCOPE = "esi-search.search_structures.v1";
+const NEED = `${SCOPE} ${SEARCH_SCOPE}`;
 const HUBS = ["Jita", "Amarr", "Dodixie", "Rens", "Hek"];
 const DEFAULTS = { maxIdx: 4, hub: -1, sort: "idx" };
 
@@ -26,7 +29,7 @@ export async function initTatara(root, bridge) {
 
   root.innerHTML = `
     <div class="intro">Public Tataras in low/null-sec systems next to high-sec, filtered by reaction cost index. Structure details are
-      not public, so this needs the <code>${SCOPE}</code> scope: press "Log in with structure access" (the normal login does not ask for it). Your application at developers.eveonline.com must have that scope enabled, otherwise EVE answers "invalid_scope".</div>
+      not public, so this needs the <code>${SCOPE}</code> and <code>${SEARCH_SCOPE}</code> scopes: press "Log in with structure access" (the normal login does not ask for them). Your application at developers.eveonline.com must have both scopes enabled, otherwise EVE answers "invalid_scope". The scan lists public structures and also searches every candidate system for structures your character can dock at (so private ones you have access to appear too); structures that have been renamed to something without the system name are not found.</div>
     <div class="bar">
       <span id="t-who" class="muted"></span>
       <label>Max reaction index % <input type="number" id="t-max" step="0.1" min="0" value="${a.maxIdx}"></label>
@@ -53,7 +56,7 @@ export async function initTatara(root, bridge) {
 
   function showWho() {
     const c = esi.character();
-    const ok = esi.loggedIn() && esi.hasScope(SCOPE);
+    const ok = esi.loggedIn() && esi.hasScope(SCOPE) && esi.hasScope(SEARCH_SCOPE);
     $("t-who").textContent = !esi.loggedIn() ? "Not logged in" : ok ? `Logged in as ${c.name}` : `Logged in as ${c.name}, but without structure access`;
     $("t-grant").hidden = ok;
   }
@@ -90,22 +93,45 @@ export async function initTatara(root, bridge) {
     return idx;
   }
 
+  // Structure search only returns structures the logged-in character has docking access to (public ones included).
+  // Structure names normally start with the system name, so search "<system> - " for every candidate system.
+  async function searchSystems() {
+    const cid = esi.character().id, out = new Set(), queue = [...sys];
+    let n = 0, auth = await esi.accessToken();
+    const worker = async () => {
+      while (queue.length) {
+        const s = queue.pop();
+        const r = await get(`/characters/${cid}/search${slash()}?categories=structure&strict=false&search=${encodeURIComponent(s[1] + " - ")}`, { auth }).catch(() => null);
+        if (r && r.ok) for (const i of (await r.json()).structure || []) out.add(i);
+        else if (r && (r.status === 401 || r.status === 403)) throw new Error("Structure search was refused: log in again with structure access.");
+        n++;
+        if (n % 5 === 0) { prog(n / sys.length); status(`Step 3/4: searching systems... ${n} of ${sys.length}`); }
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    return [...out];
+  }
+
   async function scan() {
     if (busy) return;
-    if (!esi.loggedIn() || !esi.hasScope(SCOPE)) { status("Structure details need a login with structure access: press \"Log in with structure access\".", true); return; }
+    if (!esi.loggedIn() || !esi.hasScope(SCOPE) || !esi.hasScope(SEARCH_SCOPE)) { status("Structure details need a login with structure access: press \"Log in with structure access\".", true); return; }
     busy = true; $("t-scan").disabled = true; prog(-1);
     try {
-      status("Step 1/3: loading reaction cost indices...");
+      status("Step 1/4: loading reaction cost indices...");
       const idx = await loadIndices();
-      status("Step 2/3: loading the public structure list...");
+      status("Step 2/4: loading the public structure list...");
       const lr = await get("/universe/structures" + slash());
       if (!lr.ok) throw new Error(`Structure list failed (${lr.status})`);
-      const ids = await lr.json();
+      const pub = await lr.json();
+      status("Step 3/4: searching each system for structures you can dock at...");
+      const found = await searchSystems();
+      const retry = new Set(found);
+      const ids = [...new Set([...pub, ...found])];
       const cache = lsGet(K_STRUCT, {});
-      const todo = ids.filter((id) => !(id in cache));
+      const todo = ids.filter((id) => !(id in cache) || (cache[id] === 0 && retry.has(id)));
       let done = 0, stop = false, auth = await esi.accessToken();
       const total = todo.length;
-      status(`Step 3/3: ${ids.length} public structures, ${total} not cached yet...`);
+      status(`Step 4/4: ${ids.length} public structures, ${total} not cached yet...`);
       prog(total ? 0 : 1);
       const worker = async () => {
         while (todo.length && !stop) {
@@ -116,7 +142,7 @@ export async function initTatara(root, bridge) {
           else if (r && (r.status === 403 || r.status === 404)) cache[id] = 0;
           else if (r && r.status === 401) { stop = true; status("Token rejected, log in again", true); }
           done++;
-          if (done % 25 === 0) { prog(done / total); status(`Step 3/3: checking structures... ${done} of ${total} (${Math.round((done / total) * 100)}%)`); lsSet(K_STRUCT, cache); }
+          if (done % 25 === 0) { prog(done / total); status(`Step 4/4: checking structures... ${done} of ${total} (${Math.round((done / total) * 100)}%)`); lsSet(K_STRUCT, cache); }
         }
       };
       await Promise.all(Array.from({ length: 8 }, worker));
@@ -167,7 +193,7 @@ export async function initTatara(root, bridge) {
   $("t-max").addEventListener("change", (e) => { a.maxIdx = e.target.value; save(); render(); });
   $("t-hub").addEventListener("change", (e) => { a.hub = e.target.value; save(); render(); });
   $("t-sort").addEventListener("change", (e) => { a.sort = e.target.value; save(); render(); });
-  $("t-grant").addEventListener("click", () => esi.login(SCOPE).catch((e) => status(e.message, true)));
+  $("t-grant").addEventListener("click", () => esi.login(NEED).catch((e) => status(e.message, true)));
   $("t-scan").addEventListener("click", scan);
   $("t-clear").addEventListener("click", () => { lsDel(K_STRUCT); lsDel(K_RESULTS); $("t-out").innerHTML = ""; prog(0); status("Cache cleared"); });
   $("t-copy").addEventListener("click", () => {
